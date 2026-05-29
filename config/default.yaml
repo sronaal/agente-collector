@@ -1,0 +1,39 @@
+# Configuracion por defecto del agente CallMetric Pro
+# Los valores en .env sobrescriben estos valores
+
+agente:
+  id: ""
+  token_registro: ""
+  intervalo_heartbeat: 30
+
+ami:
+  host: "127.0.0.1"
+  puerto: 5038
+  usuario: ""
+  secreto: ""
+  timeout_accion: 5.0
+  timeout_conexion: 10.0
+  timeout_lectura: 30.0
+  intervalo_ping: 10.0
+  intentos_reconexion: 10
+  demora_inicial_reconexion: 1.0
+  demora_maxima_reconexion: 60.0
+
+backend:
+  url: ""
+  timeout_peticion: 30.0
+  intentos_maximos: 3
+
+buffer:
+  ruta: "/tmp/callmetric/buffer.db"
+  tamano_maximo: 10000
+  tamano_lote: 50
+  intervalo_flush: 60
+
+transmision:
+  modo: "http"  # http | websocket | ambos
+  comprimir: false
+
+monitoreo:
+  intervalo_metricas: 60
+  habilitado: true

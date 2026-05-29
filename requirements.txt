@@ -1,0 +1,21 @@
+# CallMetric Pro Agent - Dependencias del proyecto
+# Python 3.10+ requerido
+# Instalar con: pip install -r requirements.txt
+
+# Cliente AMI asincrono moderno para Asterisk
+asyncio-manager==1.0.1
+
+# Cliente HTTP asincrono con reintentos y TLS
+httpx>=0.27.0
+
+# Cliente WebSocket asincrono para eventos en tiempo real
+websockets>=12.0
+
+# SQLite asincrono para buffer offline
+aiosqlite>=0.20.0
+
+# Carga de variables de entorno desde archivo .env
+python-dotenv>=1.0.0
+
+# Metricas del sistema (CPU, RAM, disco)
+psutil>=5.9.0
