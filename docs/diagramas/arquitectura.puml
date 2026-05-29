@@ -1,0 +1,104 @@
+@startuml
+!theme plain
+
+title "Arquitectura de Componentes - CallMetric Pro Agent"
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+
+package "Motor Ingestion (Facade)" as FACADE {
+  [MotorIngestion] as MOTOR
+}
+
+package "Core (Singleton)" as CORE {
+  [ConfiguracionAgente] as CONFIG
+  [LoggerEstructurado] as LOGGER
+  [ContextoEjecucion] as CONTEXTO
+}
+
+package "Fabrica (Factory Method)" as FACTORY {
+  [FabricaFuenteEventos] as FABRICA
+}
+
+package "Conector" as CONNECTOR {
+  [ConectorAMI] as AMI
+}
+
+package "Iterador (Iterator)" as ITERATOR {
+  [StreamAMI] as STREAM
+}
+
+package "Estrategias (Strategy)" as STRATEGIES {
+  [NormalizadorAMI] as NORM
+  [BackoffExponencial] as RETRY
+  [EstrategiaHTTPBatch] as HTTP
+  [EstrategiaWSRealtime] as WS
+}
+
+package "Comandos (Command)" as COMMANDS {
+  [ComandoProcesarEvento] as CMD_PROC
+  [ComandoVaciarBuffer] as CMD_FLUSH
+  [ComandoEnviarHeartbeat] as CMD_HB
+}
+
+package "Buffer" as BUFFER {
+  [AlmacenSQLite] as SQLITE
+  [GestorColas] as COLA
+}
+
+package "Transmisores" as TX {
+  [ClienteHTTP] as CLIENT_HTTP
+  [ClienteWebSocket] as CLIENT_WS
+}
+
+package "Salud" as HEALTH {
+  [HeartbeatManager] as HB
+  [AutoMonitor] as MONITOR
+}
+
+' --- Conexiones principales ---
+
+MOTOR --> FABRICA : crea >
+MOTOR --> AMI : inicia >
+MOTOR --> STREAM : procesa >
+MOTOR --> NORM : normaliza >
+MOTOR --> COLA : encola >
+MOTOR --> SQLITE : persiste >
+MOTOR --> CLIENT_HTTP : transmite >
+MOTOR --> CLIENT_WS : transmite >
+MOTOR --> HB : heartbeat >
+MOTOR --> MONITOR : monitorea >
+
+AMI --> STREAM : produce eventos >
+STREAM --> CMD_PROC : envia evento >
+CMD_PROC --> NORM : normaliza >
+CMD_PROC --> COLA : encola >
+
+COLA --> HTTP : si hay red >
+COLA --> SQLITE : si no hay red >
+SQLITE --> CMD_FLUSH : sincroniza >
+CMD_FLUSH --> HTTP : envia lotes >
+
+CMD_HB --> HB : ejecuta >
+CMD_HB --> CLIENT_HTTP : envia ping >
+
+' --- Dependencias de Singleton ---
+AMI -down-> CORE : usa
+STREAM -down-> CORE : usa
+NORM -down-> CONTEXTO : usa
+CMD_PROC -down-> CORE : usa
+COLA -down-> CONTEXTO : usa
+CLIENT_HTTP -down-> LOGGER : usa
+
+legend right
+  **Patrones**
+  |_Singleton_| Core |
+  |_Factory Method_| Fabrica |
+  |_Iterator_| Stream |
+  |_Strategy_| Estrategias |
+  |_Command_| Comandos |
+  |_Facade_| MotorIngestion |
+endlegend
+
+@enduml

@@ -1,0 +1,112 @@
+@startuml
+!theme plain
+
+title "Estructura de Directorios - CallMetric Pro Agent"
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam folderBackgroundColor #E8F0FE
+skinparam folderBorderColor #1A73E8
+
+folder "prueba_agente/" as ROOT {
+  file ".env" as ENV
+  file "requirements.txt" as REQ
+
+  folder "config/" as CONFIG {
+    file "default.yaml" as YAML
+  }
+
+  folder "src/" as SRC {
+    file "__init__.py" as INIT
+    file "main.py" as MAIN
+
+    folder "core/" as CORE {
+      file "__init__.py" as CINIT
+      file "config.py" as CONFIG_PY
+      file "logger.py" as LOGGER_PY
+      file "contexto.py" as CTX_PY
+    }
+
+    folder "factories/" as FACT {
+      file "__init__.py" as FINIT
+      file "base.py" as FBASE
+      file "event_source_factory.py" as FCONCRETE
+    }
+
+    folder "connectors/" as CONN {
+      file "__init__.py" as CNINIT
+      file "base.py" as CBASE
+      file "ami_connector.py" as AMI
+    }
+
+    folder "iterators/" as ITER {
+      file "__init__.py" as IINIT
+      file "base.py" as IBASE
+      file "ami_stream.py" as STREAM
+    }
+
+    folder "strategies/" as STRAT {
+      file "__init__.py" as SINIT
+      file "base.py" as SBASE
+      file "normalization.py" as NORM
+      file "retry_policy.py" as RETRY
+      file "transmission.py" as TRANS
+    }
+
+    folder "commands/" as CMD {
+      file "__init__.py" as CMINIT
+      file "base.py" as CMBASE
+      file "process_event.py" as PROC
+      file "flush_buffer.py" as FLUSH
+      file "send_heartbeat.py" as HB
+    }
+
+    folder "facade/" as FAC {
+      file "__init__.py" as FAINIT
+      file "ingestion_engine.py" as ENGINE
+    }
+
+    folder "buffer/" as BUF {
+      file "__init__.py" as BINIT
+      file "sqlite_store.py" as SQL
+      file "queue_manager.py" as QUEUE
+    }
+
+    folder "transmitters/" as TX {
+      file "__init__.py" as TINIT
+      file "http_client.py" as HTTP
+      file "ws_client.py" as WS
+    }
+
+    folder "health/" as HEA {
+      file "__init__.py" as HINIT
+      file "heartbeat.py" as HBPM
+      file "self_monitor.py" as MON
+    }
+  }
+
+  folder "docs/" as DOCS {
+    file "README.md" as README
+    file "ESTRUCTURA.md" as ESTRUC
+    folder "diagramas/" as DIAG {
+      file "arquitectura.puml"
+      file "clases.puml"
+      file "flujo_llamada.puml"
+      file "despliegue.puml"
+      file "estructura_directorios.puml"
+      file "dependencias.puml"
+    }
+  }
+}
+
+legend right
+  **Nota**
+  — Archivos .py implementan
+    patrones de diseno
+  — Cada modulo tiene
+    __init__.py para paquete
+  — .venv/ excluido del
+    diagrama por brevedad
+endlegend
+
+@enduml

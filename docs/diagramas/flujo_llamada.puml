@@ -1,0 +1,66 @@
+@startuml
+!theme plain
+
+title "Flujo de una Llamada - Secuencia Completa"
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+
+actor "PBX Asterisk" as ASTERISK
+participant "ConectorAMI" as CONECTOR
+participant "StreamAMI" as STREAM
+participant "NormalizadorAMI" as NORM
+participant "LlamadaEnProgreso" as LLAMADA
+participant "GestorColas" as COLA
+participant "AlmacenSQLite" as BUFFER
+participant "API Prueba" as API
+database "Backend" as BACKEND
+
+== Nace la llamada ==
+
+ASTERISK -> CONECTOR: Evento NewChannel\n(origen=100, destino=200, id=abc)
+CONECTOR -> STREAM: Encola evento crudo
+STREAM -> NORM: Envia a normalizar
+NORM -> LLAMADA: Crea/actualiza LlamadaEnProgreso
+note right: Evento parcial\nNO se transmite
+
+== Marcacion ==
+
+ASTERISK -> CONECTOR: Evento Dial\n(origen=100, destino=200)
+CONECTOR -> STREAM: Encola evento
+STREAM -> NORM: Envia a normalizar
+NORM -> LLAMADA: Actualiza con datos\nde destino
+note right: Evento parcial\nNO se transmite
+
+== Responde ==
+
+ASTERISK -> CONECTOR: Evento Answer\n(canal=SIP/200-def)
+CONECTOR -> STREAM: Encola evento
+STREAM -> NORM: Envia a normalizar
+NORM -> LLAMADA: Marca respondio=true
+note right: Evento parcial\nNO se transmite
+
+== Cuelga ==
+
+ASTERISK -> CONECTOR: Evento Hangup\n(duracion=45s, causa=Normal)
+CONECTOR -> STREAM: Encola evento
+STREAM -> NORM: Envia a normalizar
+NORM -> LLAMADA: Actualiza con duracion\ny causa
+
+NORM -> NORM: Consolidar llamada
+note right: Genera registro unico\ncon TODOS los datos
+
+NORM -> COLA: Encola llamada_completa
+
+alt Hay conexion
+    COLA -> API: POST /api/v1/agent/events
+    API -> API: Muestra en consola
+    API --> COLA: 200 OK
+    COLA -> NORM: Confirmacion
+else Sin conexion
+    COLA -> BUFFER: Guarda en SQLite
+    note right: Reintento posterior\ncon backoff exponencial
+    BUFFER --> COLA: OK
+end
+
+@enduml

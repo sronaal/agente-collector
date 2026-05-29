@@ -1,0 +1,151 @@
+@startuml
+!theme plain
+
+title "Dependencias entre Modulos - Arbol de Importaciones"
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam packageBorderColor #666666
+
+package "main.py" as MAIN {
+  [main] as MAIN_PY
+}
+
+package "core/" as CORE {
+  [config] as CONFIG_PY
+  [logger] as LOGGER_PY
+  [contexto] as CTX_PY
+}
+
+package "factories/" as FACT {
+  [base] as FBASE
+  [event_source_factory] as FCONCRETE
+}
+
+package "connectors/" as CONN {
+  [base] as CBASE
+  [ami_connector] as AMI
+}
+
+package "iterators/" as ITER {
+  [base] as IBASE
+  [ami_stream] as STREAM
+}
+
+package "strategies/" as STRAT {
+  [base] as SBASE
+  [normalization] as NORM
+  [retry_policy] as RETRY
+  [transmission] as TRANS
+}
+
+package "commands/" as CMD {
+  [base] as CMBASE
+  [process_event] as PROC
+  [flush_buffer] as FLUSH
+  [send_heartbeat] as HB
+}
+
+package "facade/" as FAC {
+  [ingestion_engine] as ENGINE
+}
+
+package "buffer/" as BUF {
+  [sqlite_store] as SQL
+  [queue_manager] as QUEUE
+}
+
+package "transmitters/" as TX {
+  [http_client] as HTTP
+  [ws_client] as WS
+}
+
+package "health/" as HEA {
+  [heartbeat] as HBPM
+  [self_monitor] as MON
+}
+
+' ====== main.py ======
+MAIN_PY --> CONFIG_PY : usa
+MAIN_PY --> LOGGER_PY : usa
+MAIN_PY --> ENGINE : inicia
+
+' ====== facade (orquesta todo) ======
+ENGINE --> FCONCRETE : "fabrica.crear_conector()"
+ENGINE --> AMI : inicia
+ENGINE --> STREAM : procesa
+ENGINE --> NORM : normaliza
+ENGINE --> SQL : persiste
+ENGINE --> QUEUE : encola
+ENGINE --> HTTP : transmite
+ENGINE --> WS : transmite
+ENGINE --> HBPM : heartbeat
+ENGINE --> MON : monitorea
+
+' ====== factories ======
+FCONCRETE --> FBASE : hereda
+FCONCRETE --> AMI : instancia
+
+' ====== connectors ======
+AMI --> CBASE : hereda
+AMI --> CTX_PY : estado
+AMI --> LOGGER_PY : log
+
+' ====== iterators ======
+STREAM --> IBASE : hereda
+STREAM --> AMI : consume
+
+' ====== strategies ======
+NORM --> SBASE : hereda
+NORM --> CTX_PY : agente_id
+RETRY --> SBASE : hereda
+TRANS --> SBASE : hereda
+TRANS --> HTTP : usa
+TRANS --> WS : usa
+
+' ====== commands ======
+PROC --> CMBASE : hereda
+PROC --> NORM : normaliza
+PROC --> QUEUE : encola
+PROC --> CTX_PY : metricas
+PROC --> LOGGER_PY : log
+
+FLUSH --> CMBASE : hereda
+FLUSH --> SQL : lee buffer
+FLUSH --> TRANS : transmite
+FLUSH --> QUEUE : reencola
+
+HB --> CMBASE : hereda
+HB --> CTX_PY : estado
+HB --> HTTP : ping
+HB --> LOGGER_PY : log
+
+' ====== buffer ======
+QUEUE --> SQL : guarda/recupera
+QUEUE --> TRANS : transmite
+QUEUE --> CTX_PY : estado
+
+' ====== transmitters ======
+HTTP --> RETRY : reintentos
+HTTP --> LOGGER_PY : log
+WS --> RETRY : reintentos
+WS --> LOGGER_PY : log
+
+' ====== health ======
+HBPM --> HB : ejecuta
+MON --> SQL : buffer size
+MON --> CTX_PY : metricas
+
+' ====== core (singletons usados por todos) ======
+CONFIG_PY -down- LOGGER_PY : [info] log
+CTX_PY -down- LOGGER_PY : [info] log
+
+legend right
+  **Leyenda**
+  --> : Dependencia directa
+  -down- : Dependencia debil
+  Las flechas indican
+  "importa" o "usa"
+endlegend
+
+@enduml

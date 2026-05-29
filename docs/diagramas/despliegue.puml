@@ -1,0 +1,76 @@
+@startuml
+!theme plain
+
+title "Diagrama de Despliegue - CallMetric Pro Agent"
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam nodeStyle rectangle
+
+node "Servidor PBX (On-Premise)" as PBX {
+  node "Asterisk/FreePBX" as ASTERISK {
+    component "AMI\n(Puerto 5038)" as AMI
+    component "CDR/CEL" as CDR
+  }
+
+  node "Agente CallMetric" as AGENTE {
+    [MotorIngestion] as MOTOR
+    [ConectorAMI] as CONECTOR
+    [Normalizador] as NORM
+    [Buffer SQLite] as BUFFER
+    [Cliente HTTP] as HTTP_CLIENT
+    [Cliente WS] as WS_CLIENT
+  }
+
+  AMI <..> CONECTOR : Socket TCP\n(asyncio-manager)
+}
+
+node "Entorno Desarrollo" as DEV {
+  node "API de Prueba (Node.js)" as API_NODE {
+    [Express Server\nPuerto 3000] as EXPRESS
+    [POST /api/v1/agent/events] as EVENTS
+    [POST /api/v1/agent/heartbeat] as HB
+  }
+}
+
+node "Nube (Produccion Futura)" as CLOUD {
+  node "Backend Central" as BACKEND {
+    [Spring Boot API] as SPRING
+    [PostgreSQL] as PG
+    [Redis] as REDIS
+  }
+
+  node "Frontend" as FE {
+    [React Dashboard] as DASHBOARD
+  }
+}
+
+AGENTE --> DEV : Desarrollo local\nhttp://localhost:3000
+
+AGENTE --> CLOUD : Produccion\nhttps://api.callmetric.pro
+
+HTTP_CLIENT --> EXPRESS : HTTPS/WSS
+WS_CLIENT --> EXPRESS : WSS
+
+EXPRESS --> EVENTS : POST
+EXPRESS --> HB : POST
+EXPRESS --> EVENTS : Recibe lotes
+
+SPRING --> PG : Persistencia
+SPRING --> REDIS : Cache/Realtime
+SPRING <.. FE : WebSocket
+
+legend right
+  **Flujo MVP (local):**
+  1. Asterisk -> AMI
+  2. Conector -> Normalizador
+  3. Normalizador -> Buffer
+  4. Buffer -> API Node.js (:3000)
+
+  **Flujo produccion (futuro):**
+  5. API Node.js -> Backend Spring
+  6. Spring -> PostgreSQL
+  7. Frontend <- WebSocket
+endlegend
+
+@enduml

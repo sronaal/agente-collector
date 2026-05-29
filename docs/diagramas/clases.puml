@@ -1,0 +1,204 @@
+@startuml
+!theme plain
+
+title "Diagrama de Clases - Patrones de Diseno"
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam classAttributeIconSize 0
+
+' ========== SINGLETON ==========
+
+package "Singleton" as SINGLETON {
+  class ConfiguracionAgente {
+    - _instancia: ConfiguracionAgente
+    + agente_id: str
+    + ami: ConfiguracionAMI
+    + backend: ConfiguracionBackend
+    + buffer: ConfiguracionBuffer
+    + {static} obtener_instancia() ConfiguracionAgente
+    + cargar() void
+  }
+
+  class LoggerEstructurado {
+    - _instancia: LoggerEstructurado
+    - _logger: Logger
+    + {static} obtener_instancia() LoggerEstructurado
+    + configurar(nivel) Logger
+    + info(mensaje, contexto) void
+    + error(mensaje, contexto) void
+  }
+
+  class ContextoEjecucion {
+    - _instancia: ContextoEjecucion
+    + agente_id: str
+    + estado: EstadoAgente
+    + metricas: MetricasInternas
+    + {static} obtener_instancia() ContextoEjecucion
+    + inicializar(agente_id, pbx_host) void
+    + activar_modo_seguro() void
+  }
+}
+
+' ========== FACTORY ==========
+
+package "Factory Method" as FACTORY {
+  abstract class FabricaAbstracta {
+    + {abstract} crear_conector(tipo_fuente, parametros) Any
+  }
+
+  class FabricaFuenteEventos {
+    - CONECTORES_DISPONIBLES: dict
+    + crear_conector(tipo_fuente, parametros) Any
+  }
+
+  FabricaAbstracta <|-- FabricaFuenteEventos
+}
+
+' ========== CONNECTOR ==========
+
+package "Connector" as CONNECTOR {
+  abstract class ConectorBase {
+    + {abstract} conectar() void
+    + {abstract} desconectar() void
+    + {abstract} leer_eventos() AsyncIterator
+    + {abstract} esta_conectado: bool
+  }
+
+  class ConectorAMI {
+    - gestor_llamadas: CallManager
+    - _cola_eventos: Queue
+    + conectar() void
+    + desconectar() void
+    + leer_eventos() AsyncIterator
+    - _registrar_manejadores_eventos() void
+    - _encolar_evento(evento) void
+  }
+
+  ConectorBase <|-- ConectorAMI
+  ConectorAMI --> "1" CallManager : envuelve
+}
+
+' ========== ITERATOR ==========
+
+package "Iterator" as ITERATOR {
+  abstract class IteradorBase {
+    + {abstract} iterar() AsyncIterator
+    + {abstract} detener() void
+  }
+
+  class StreamAMI {
+    - fuente: ConectorBase
+    + iterar() AsyncIterator
+    + detener() void
+  }
+
+  IteradorBase <|-- StreamAMI
+  StreamAMI --> ConectorBase : consume
+}
+
+' ========== STRATEGY ==========
+
+package "Strategy" as STRATEGY {
+  abstract class EstrategiaNormalizacion {
+    + {abstract} normalizar(evento) Dict
+  }
+
+  class LlamadaEnProgreso {
+    + id_unico: str
+    + origen: str
+    + destino: str
+    + duracion: str
+    + actualizar_con(evento) void
+    + consolidar(agente_id) Dict
+  }
+
+  class NormalizadorAMI {
+    - _llamadas: Dict
+    + normalizar(evento) Optional[Dict]
+    - _limpiar_llamadas_huerfanas() void
+  }
+
+  abstract class EstrategiaReintento {
+    + {abstract} calcular_demora(intento) float
+  }
+
+  class BackoffExponencial {
+    + calcular_demora(intento) float
+  }
+
+  abstract class EstrategiaTransmision {
+    + {abstract} transmitir(eventos, agente_id) bool
+  }
+
+  class EstrategiaHTTPBatch {
+    + transmitir(eventos, agente_id) bool
+  }
+
+  class EstrategiaWSRealtime {
+    + transmitir(eventos, agente_id) bool
+  }
+
+  EstrategiaNormalizacion <|-- NormalizadorAMI
+  NormalizadorAMI *--> "0..*" LlamadaEnProgreso : acumula
+
+  EstrategiaReintento <|-- BackoffExponencial
+
+  EstrategiaTransmision <|-- EstrategiaHTTPBatch
+  EstrategiaTransmision <|-- EstrategiaWSRealtime
+}
+
+' ========== COMMAND ==========
+
+package "Command" as COMMAND {
+  abstract class ComandoBase {
+    + {abstract} ejecutar() bool
+    + deshacer() void
+  }
+
+  class ComandoProcesarEvento {
+    + evento_crudo: Dict
+    + ejecutar() bool
+  }
+
+  class ComandoVaciarBuffer {
+    + almacen: AlmacenSQLite
+    + ejecutar() bool
+  }
+
+  class ComandoEnviarHeartbeat {
+    + gestor: CallManager
+    + ejecutar() bool
+  }
+
+  ComandoBase <|-- ComandoProcesarEvento
+  ComandoBase <|-- ComandoVaciarBuffer
+  ComandoBase <|-- ComandoEnviarHeartbeat
+}
+
+' ========== FACADE ==========
+
+package "Facade" as FACADE {
+  class MotorIngestion {
+    - conector: ConectorAMI
+    - stream: StreamAMI
+    - normalizador: NormalizadorAMI
+    - almacen: AlmacenSQLite
+    - gestor_colas: GestorColas
+    - cliente_http: ClienteHTTP
+    - heartbeat: HeartbeatManager
+    + iniciar() void
+    + detener() void
+    + obtener_estado() Dict
+  }
+
+  MotorIngestion --> "1" ConectorAMI
+  MotorIngestion --> "1" StreamAMI
+  MotorIngestion --> "1" NormalizadorAMI
+  MotorIngestion --> "1" AlmacenSQLite
+  MotorIngestion --> "1" GestorColas
+  MotorIngestion --> "1" ClienteHTTP
+  MotorIngestion --> "1" HeartbeatManager
+}
+
+@enduml
