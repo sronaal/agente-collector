@@ -174,6 +174,15 @@ paso2_dependencias() {
             ;;
     esac
 
+    if [ ! -f /usr/include/zlib.h ]; then
+        aviso "zlib.h no encontrado. Intentando instalación específica..."
+        case "$DISTRO_FAMILY" in
+            rhel) instalar_paquetes zlib-devel ;;
+            debian) instalar_paquetes zlib1g-dev ;;
+            suse) instalar_paquetes zlib-devel ;;
+        esac
+    fi
+
     ok "Dependencias instaladas"
 }
 
@@ -223,7 +232,15 @@ compilar_openssl11() {
     tar -xf openssl-1.1.1w.tar.gz
     cd openssl-1.1.1w
 
-    ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared zlib
+    local config_opts="--prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared"
+    if [ -f /usr/include/zlib.h ]; then
+        config_opts="$config_opts zlib"
+        ok "Compilando OpenSSL con soporte zlib"
+    else
+        aviso "zlib.h no encontrado. OpenSSL se compilará sin soporte zlib (no crítico)"
+    fi
+
+    ./config $config_opts
     make -j$(nproc)
     make install
 
