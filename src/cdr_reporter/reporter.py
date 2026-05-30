@@ -108,7 +108,7 @@ class ReporterCDR:
         if self._pool is None:
             return
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cursor:
