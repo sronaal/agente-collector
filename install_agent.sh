@@ -117,15 +117,37 @@ paso1_python311() {
     echo "====================================================="
     echo ""
 
+    _reparar_ldconfig() {
+        if [ -d "${PYTHON_PREFIX}/lib" ] && [ ! -f /etc/ld.so.conf.d/python3.11.conf ]; then
+            echo "${PYTHON_PREFIX}/lib" > /etc/ld.so.conf.d/python3.11.conf
+            ldconfig
+        fi
+    }
+
     if command -v python3.11 &>/dev/null; then
-        ok "Python 3.11 ya instalado: $(python3.11 --version)"
-        return 0
+        if python3.11 --version &>/dev/null; then
+            ok "Python 3.11 ya instalado: $(python3.11 --version)"
+            return 0
+        fi
+        aviso "python3.11 encontrado pero no arranca (librería compartida faltante)"
+        _reparar_ldconfig
+        if python3.11 --version &>/dev/null; then
+            ok "Python 3.11 reparado (ldconfig actualizado)"
+            return 0
+        fi
+        aviso "Recompilando Python..."
+        return 1
     fi
 
     if [ -x "${PYTHON_PREFIX}/bin/python3.11" ]; then
-        ok "Python 3.11 encontrado en ${PYTHON_PREFIX}"
         ln -sf "${PYTHON_PREFIX}/bin/python3.11" /usr/local/bin/python3.11
-        return 0
+        _reparar_ldconfig
+        if python3.11 --version &>/dev/null; then
+            ok "Python 3.11 encontrado en ${PYTHON_PREFIX}"
+            return 0
+        fi
+        aviso "Python en ${PYTHON_PREFIX} no funciona. Recompilando..."
+        return 1
     fi
 
     aviso "Python 3.11 no encontrado. Compilando desde fuente..."
