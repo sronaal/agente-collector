@@ -174,7 +174,11 @@ paso2_dependencias() {
             ;;
     esac
 
-    if [ ! -f /usr/include/zlib.h ]; then
+    local _zlib_found=false
+    for _zp in /usr/include/zlib.h /usr/include/*-linux-gnu/zlib.h; do
+        [ -f "$_zp" ] && _zlib_found=true && break
+    done
+    if ! $_zlib_found; then
         aviso "zlib.h no encontrado. Intentando instalación específica..."
         case "$DISTRO_FAMILY" in
             rhel) instalar_paquetes zlib-devel ;;
@@ -232,8 +236,13 @@ compilar_openssl11() {
     tar -xf openssl-1.1.1w.tar.gz
     cd openssl-1.1.1w
 
+    local _zlib_found=false
+    for _zp in /usr/include/zlib.h /usr/include/*-linux-gnu/zlib.h; do
+        [ -f "$_zp" ] && _zlib_found=true && break
+    done
+
     local config_opts="--prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared"
-    if [ -f /usr/include/zlib.h ]; then
+    if $_zlib_found; then
         config_opts="$config_opts zlib"
         ok "Compilando OpenSSL con soporte zlib"
     else
@@ -282,14 +291,30 @@ paso3_compilar_python() {
 
     make distclean || true
 
-    ./configure \
-        --prefix=${PYTHON_PREFIX} \
-        --with-openssl=${ssl_dir} \
-        --with-openssl-rpath=auto \
-        --enable-shared
+    local _zlib_found=false
+    for _zp in /usr/include/zlib.h /usr/include/*-linux-gnu/zlib.h; do
+        [ -f "$_zp" ] && _zlib_found=true && break
+    done
+
+    local _configure_opts="--prefix=${PYTHON_PREFIX} --with-openssl=${ssl_dir} --with-openssl-rpath=auto --enable-shared"
+    if ! $_zlib_found; then
+        aviso "zlib.h no encontrado — compilando Python sin ensurepip (pip se instalará manualmente)"
+        _configure_opts="$_configure_opts --without-ensurepip"
+    fi
+
+    ./configure $_configure_opts
 
     make -j$(nproc)
     make altinstall
+
+    if ! $_zlib_found; then
+        aviso "Instalando pip manualmente via get-pip.py..."
+        wget -q https://bootstrap.pypa.io/get-pip.py
+        export LD_LIBRARY_PATH="${ssl_dir}/lib:${LD_LIBRARY_PATH}"
+        ${PYTHON_PREFIX}/bin/python3.11 get-pip.py
+        rm -f get-pip.py
+        ok "pip instalado manualmente"
+    fi
 
     echo "${PYTHON_PREFIX}/lib" > /etc/ld.so.conf.d/python3.11.conf
     ldconfig
