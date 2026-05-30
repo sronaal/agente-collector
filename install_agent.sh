@@ -209,6 +209,19 @@ paso2_dependencias() {
         esac
     fi
 
+    local _sqlite_found=false
+    for _sp in /usr/include/sqlite3.h /usr/include/*-linux-gnu/sqlite3.h; do
+        [ -f "$_sp" ] && _sqlite_found=true && break
+    done
+    if ! $_sqlite_found; then
+        aviso "sqlite3.h no encontrado. Intentando instalación específica..."
+        case "$DISTRO_FAMILY" in
+            rhel) instalar_paquetes sqlite-devel ;;
+            debian) instalar_paquetes libsqlite3-dev ;;
+            suse) instalar_paquetes sqlite3-devel ;;
+        esac
+    fi
+
     ok "Dependencias instaladas"
 }
 
@@ -356,16 +369,39 @@ paso4_verificar_python() {
     echo "====================================================="
     echo ""
 
+    _reconstruir_modulo() {
+        local _modulo="$1" _pkg_rhel="$2" _pkg_deb="$3" _pkg_suse="$4"
+        aviso "Módulo '${_modulo}' no disponible — instalando dev headers y reconstruyendo..."
+        case "$DISTRO_FAMILY" in
+            rhel) instalar_paquetes "$_pkg_rhel" ;;
+            debian) instalar_paquetes "$_pkg_deb" ;;
+            suse) instalar_paquetes "$_pkg_suse" ;;
+        esac
+        if [ -d "/usr/src/Python-${PYTHON_VERSION}" ]; then
+            cd "/usr/src/Python-${PYTHON_VERSION}"
+            make -j$(nproc) 2>&1 | tail -5
+            make altinstall 2>&1 | tail -5
+            ldconfig
+            if python3.11 -c "import ${_modulo}" &>/dev/null; then
+                ok "Módulo '${_modulo}' reconstruido"
+                return 0
+            fi
+        fi
+        error "Módulo '${_modulo}' sigue sin funcionar"
+        error "Recompila manualmente: cd /usr/src/Python-${PYTHON_VERSION} && make clean && make -j\$(nproc) && make altinstall"
+        return 1
+    }
+
     python3.11 --version
-    python3.11 -c "import ssl; print('SSL:', ssl.OPENSSL_VERSION)"
-    python3.11 -c "
-import ssl, sqlite3, bz2, lzma, hashlib
-print('SSL ok')
-print('SQLite ok')
-print('BZ2 ok')
-print('LZMA ok')
-print('HASHLIB ok')
-"
+
+    python3.11 -c "import ssl; print('SSL:', ssl.OPENSSL_VERSION)" || true
+    python3.11 -c "import sqlite3; print('SQLite ok')" || _reconstruir_modulo \
+        "sqlite3" "sqlite-devel" "libsqlite3-dev" "sqlite3-devel" || true
+    python3.11 -c "import bz2; print('BZ2 ok')" || _reconstruir_modulo \
+        "bz2" "bzip2-devel" "libbz2-dev" "libbz2-devel" || true
+    python3.11 -c "import lzma; print('LZMA ok')" || _reconstruir_modulo \
+        "lzma" "xz-devel" "liblzma-dev" "xz-devel" || true
+    python3.11 -c "import hashlib; print('HASHLIB ok')" || true
 
     cat >/etc/profile.d/python311.sh <<EOF
 export PATH=${PYTHON_PREFIX}/bin:\$PATH
