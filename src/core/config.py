@@ -58,6 +58,18 @@ class ConfiguracionBuffer:
 
 
 @dataclass
+class ConfiguracionCDR:
+    """Configuracion de conexion a base de datos CDR de Asterisk."""
+    db_host: str = "localhost"
+    db_port: int = 3306
+    db_name: str = "asteriskcdrdb"
+    db_user: str = ""
+    db_password: str = ""
+    intervalo_reporte: int = 90
+    activo: bool = False
+
+
+@dataclass
 class ConfiguracionTransmision:
     """Configuracion del modo de transmision de eventos."""
     modo: str = "http"
@@ -96,6 +108,8 @@ class ConfiguracionAgente:
         self.buffer = ConfiguracionBuffer()
         # Configuracion del modo de transmision
         self.transmision = ConfiguracionTransmision()
+        # Configuracion de reportes CDR desde MySQL de Asterisk
+        self.cdr = ConfiguracionCDR()
 
     @classmethod
     def obtener_instancia(cls) -> ConfiguracionAgente:
@@ -147,6 +161,15 @@ class ConfiguracionAgente:
         ruta_buffer = os.getenv("RUTA_BUFFER", "/tmp/callmetric/buffer.db")
         self.buffer.ruta = ruta_buffer
         self.buffer.tamano_maximo = int(os.getenv("TAMANO_MAXIMO_BUFFER", "10000"))
+
+        # Configuracion de reportes CDR desde MySQL de Asterisk
+        self.cdr.db_host = os.getenv("CDR_DB_HOST", "localhost")
+        self.cdr.db_port = int(os.getenv("CDR_DB_PORT", "3306"))
+        self.cdr.db_name = os.getenv("CDR_DB_NAME", "asteriskcdrdb")
+        self.cdr.db_user = os.getenv("CDR_DB_USER", "")
+        self.cdr.db_password = os.getenv("CDR_DB_PASSWORD", "")
+        self.cdr.intervalo_reporte = int(os.getenv("CDR_REPORT_INTERVAL", "90"))
+        self.cdr.activo = os.getenv("CDR_REPORT_ACTIVE", "false").lower() == "true"
 
     def obtener_como_dict(self) -> Dict[str, Any]:
         """Retorna la configuracion como diccionario (sin secretos).

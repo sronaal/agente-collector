@@ -48,6 +48,8 @@ from src.strategies.transmission import EstrategiaHTTPBatch, EstrategiaWSRealtim
 from src.transmitters.http_client import ClienteHTTP
 # Cliente WebSocket asincrono con reconexion
 from src.transmitters.ws_client import ClienteWebSocket
+# Reporter de CDR historicos desde MySQL de Asterisk
+from src.cdr_reporter import ReporterCDR
 
 
 class MotorIngestion:
@@ -131,6 +133,16 @@ class MotorIngestion:
             comando_heartbeat=comando_heartbeat,
             intervalo=self.config.intervalo_heartbeat,
         )
+        # Reporter de CDR historicos (desde MySQL de Asterisk)
+        if self.config.cdr.activo:
+            self.reporter_cdr = ReporterCDR(
+                config=self.config,
+                cliente_http=self.cliente_http,
+                contexto=self.contexto,
+            )
+        else:
+            self.reporter_cdr = None
+
         # Monitor que recolecta metricas internas del agente
         self.auto_monitor = AutoMonitor(
             almacen_buffer=self.almacen,
@@ -182,6 +194,8 @@ class MotorIngestion:
         # Paso 5: Iniciar tareas periodicas de monitoreo
         await self.heartbeat.iniciar()
         await self.auto_monitor.iniciar()
+        if self.reporter_cdr is not None:
+            await self.reporter_cdr.iniciar()
 
         # Paso 6: Marcar agente como activo y arrancar bucle de procesamiento
         self.contexto.estado = EstadoAgente.ACTIVO
@@ -218,6 +232,8 @@ class MotorIngestion:
         # Paso 2: Detener heartbeat y auto-monitoreo
         await self.heartbeat.detener()
         await self.auto_monitor.detener()
+        if self.reporter_cdr is not None:
+            await self.reporter_cdr.detener()
 
         # Paso 3: Detener gestor de colas (vacia pendientes al buffer antes de salir)
         await self.gestor_colas.detener()
