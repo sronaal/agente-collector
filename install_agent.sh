@@ -131,12 +131,22 @@ _verificar_header() {
                 else
                     yum install -y "$_pkg" 2>&1 || true
                 fi
-                # Reintentar con nombre alternativo si falló
-                if [ ! -f /usr/include/zlib.h ] && [ "$_pkg" = "zlib-devel" ]; then
+                # Si falló, intentar habilitar repos comunes
+                _found=false
+                for _hp in $_header; do
+                    [ -f "$_hp" ] && _found=true && break
+                done
+                if ! $_found; then
+                    aviso "Reintentando con repositorios adicionales..."
                     if command -v dnf &>/dev/null; then
-                        dnf install -y "zlib-ng-devel" 2>/dev/null || true
+                        dnf install -y epel-release 2>/dev/null || true
+                        dnf config-manager --set-enabled crb 2>/dev/null || true
+                        dnf config-manager --set-enabled powertools 2>/dev/null || true
+                        dnf install -y "$_pkg" 2>&1 || true
                     else
-                        yum install -y "zlib-ng-devel" 2>/dev/null || true
+                        yum install -y epel-release 2>/dev/null || true
+                        yum-config-manager --enable base 2>/dev/null || true
+                        yum install -y "$_pkg" 2>&1 || true
                     fi
                 fi
                 ;;
