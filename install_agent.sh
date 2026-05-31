@@ -533,12 +533,16 @@ paso6_copiar_agente() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
-        mkdir -p "${AGENT_DIR}/config"
-        cp -r "${SCRIPT_DIR}/src" "${AGENT_DIR}/"
-        cp "${SCRIPT_DIR}/config/default.yaml" "${AGENT_DIR}/config/" 2>/dev/null || true
-        cp "${SCRIPT_DIR}/requirements.txt" "${AGENT_DIR}/"
-        cp "${SCRIPT_DIR}/.env" "${AGENT_DIR}/" 2>/dev/null || true
-        ok "Archivos copiados desde ${SCRIPT_DIR}"
+        if [ "$SCRIPT_DIR" = "$AGENT_DIR" ]; then
+            ok "Script ejecutándose desde ${AGENT_DIR} — archivos ya en su lugar"
+        else
+            mkdir -p "${AGENT_DIR}/config"
+            cp -r "${SCRIPT_DIR}/src" "${AGENT_DIR}/" || true
+            cp "${SCRIPT_DIR}/config/default.yaml" "${AGENT_DIR}/config/" 2>/dev/null || true
+            cp "${SCRIPT_DIR}/requirements.txt" "${AGENT_DIR}/" || true
+            cp "${SCRIPT_DIR}/.env" "${AGENT_DIR}/" 2>/dev/null || true
+            ok "Archivos copiados desde ${SCRIPT_DIR}"
+        fi
     else
         error "No se encuentra requirements.txt en ${SCRIPT_DIR}"
         echo "Copia manualmente los archivos del agente a ${AGENT_DIR}"
@@ -549,7 +553,7 @@ paso6_copiar_agente() {
         read -p "Presiona Enter cuando esten copiados..."
     fi
 
-    chown -R ${SERVICE_USER}:${SERVICE_USER} ${AGENT_DIR}
+    chown -R ${SERVICE_USER}:${SERVICE_USER} ${AGENT_DIR} 2>/dev/null || true
 }
 
 # =========================================================
