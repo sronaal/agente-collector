@@ -351,25 +351,28 @@ paso3_compilar_python() {
     make -j$(nproc)
     make altinstall
 
-    # pip condicional: solo si zlib está disponible
-    if python3.11 -c "import zlib" &>/dev/null; then
-        aviso "Instalando pip via get-pip.py..."
+    echo "${PYTHON_PREFIX}/lib" > /etc/ld.so.conf.d/python3.11.conf
+    ldconfig
+
+    ln -sf "${PYTHON_PREFIX}/bin/python3.11" /usr/local/bin/python3.11
+
+    # Establecer LD_LIBRARY_PATH para esta sesión
+    export LD_LIBRARY_PATH="${ssl_dir}/lib:${PYTHON_PREFIX}/lib:${LD_LIBRARY_PATH}"
+
+    if python3.11 -m ensurepip --upgrade --default-pip &>/dev/null; then
+        ok "pip instalado via ensurepip"
+    elif python3.11 -c "import zlib" &>/dev/null; then
+        aviso "ensurepip falló, intentando get-pip.py..."
         wget -q https://bootstrap.pypa.io/get-pip.py
-        export LD_LIBRARY_PATH="${ssl_dir}/lib:${LD_LIBRARY_PATH}"
-        if ${PYTHON_PREFIX}/bin/python3.11 get-pip.py; then
-            ok "pip instalado"
+        if python3.11 get-pip.py; then
+            ok "pip instalado via get-pip.py"
         else
-            aviso "get-pip.py falló - se reintentará en paso 4"
+            aviso "pip no disponible - se instalará en paso 4"
         fi
         rm -f get-pip.py
     else
         aviso "zlib no disponible - pip se instalará en paso 4"
     fi
-
-    echo "${PYTHON_PREFIX}/lib" > /etc/ld.so.conf.d/python3.11.conf
-    ldconfig
-
-    ln -sf "${PYTHON_PREFIX}/bin/python3.11" /usr/local/bin/python3.11
 
     ok "Python ${PYTHON_VERSION} compilado e instalado"
 }
@@ -416,13 +419,22 @@ paso4_verificar_python() {
     python3.11 -c "import lzma;    print('LZMA ok')"    || _reconstruir_modulo "lzma"    "xz-devel"        "liblzma-dev"    "xz-devel"         || true
     python3.11 -c "import hashlib; print('HASHLIB ok')" || true
 
-    # Reintentar pip si no está
-    python3.11 -m pip --version &>/dev/null || {
-        aviso "pip no disponible. Instalando manualmente..."
-        wget -q https://bootstrap.pypa.io/get-pip.py
-        python3.11 get-pip.py && ok "pip instalado" || error "pip no se pudo instalar"
-        rm -f get-pip.py
-    }
+    if ! python3.11 -m pip --version &>/dev/null; then
+        aviso "pip no instalado. Reintentando ensurepip..."
+        if python3.11 -m ensurepip --upgrade --default-pip &>/dev/null; then
+            ok "pip instalado"
+        else
+            aviso "ensurepip falló. Intentando get-pip.py..."
+            wget -q https://bootstrap.pypa.io/get-pip.py
+            if python3.11 get-pip.py &>/dev/null; then
+                ok "pip instalado"
+            else
+                error "pip no se pudo instalar"
+                error "Después de la instalación, ejecuta: python3.11 -m ensurepip --upgrade"
+            fi
+            rm -f get-pip.py
+        fi
+    fi
 
     cat >/etc/profile.d/python311.sh <<EOF
 export PATH=${PYTHON_PREFIX}/bin:\$PATH
