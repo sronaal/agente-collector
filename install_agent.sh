@@ -113,16 +113,39 @@ instalar_grupo_dev() {
 HEADER_ERROR=""
 _verificar_header() {
     local _nombre="$1" _header="$2" _pkg_rhel="$3" _pkg_deb="$4" _pkg_suse="$5"
-    local _found=false
+    local _found=false _pkg=""
     for _hp in $_header; do
         [ -f "$_hp" ] && _found=true && break
     done
     if ! $_found; then
-        aviso "$_nombre no encontrado. Instalando..."
         case "$DISTRO_FAMILY" in
-            rhel) instalar_paquetes "$_pkg_rhel" ;;
-            debian) instalar_paquetes "$_pkg_deb" ;;
-            suse) instalar_paquetes "$_pkg_suse" ;;
+            rhel) _pkg="$_pkg_rhel" ;;
+            debian) _pkg="$_pkg_deb" ;;
+            suse) _pkg="$_pkg_suse" ;;
+        esac
+        aviso "$_nombre no encontrado. Instalando '$_pkg'..."
+        case "$DISTRO_FAMILY" in
+            rhel)
+                if command -v dnf &>/dev/null; then
+                    dnf install -y "$_pkg" 2>&1 || true
+                else
+                    yum install -y "$_pkg" 2>&1 || true
+                fi
+                # Reintentar con nombre alternativo si falló
+                if [ ! -f /usr/include/zlib.h ] && [ "$_pkg" = "zlib-devel" ]; then
+                    if command -v dnf &>/dev/null; then
+                        dnf install -y "zlib-ng-devel" 2>/dev/null || true
+                    else
+                        yum install -y "zlib-ng-devel" 2>/dev/null || true
+                    fi
+                fi
+                ;;
+            debian)
+                apt-get install -y "$_pkg" 2>&1 || true
+                ;;
+            suse)
+                zypper install -y "$_pkg" 2>&1 || true
+                ;;
         esac
         _found=false
         for _hp in $_header; do
@@ -131,7 +154,22 @@ _verificar_header() {
     fi
     if ! $_found; then
         HEADER_ERROR="$_nombre"
-        error "FATAL: $_nombre no encontrado. Instala '$_pkg_rhel' manualmente."
+        echo ""
+        error "FATAL: $_nombre no encontrado después de instalar '$_pkg'."
+        error "Posibles causas:"
+        error "  1. Sin conexión a internet — verifica: ping google.com"
+        error "  2. Repositorios deshabilitados — verifica: yum repolist"
+        error "  3. Package manager bloqueado — verifica: rm -f /var/run/yum.pid"
+        error ""
+        error "Solución manual:"
+        if [ "$DISTRO_FAMILY" = "rhel" ]; then
+            error "  yum install -y $_pkg_rhel"
+        elif [ "$DISTRO_FAMILY" = "debian" ]; then
+            error "  apt-get install -y $_pkg_deb"
+        else
+            error "  zypper install -y $_pkg_suse"
+        fi
+        echo ""
         return 1
     fi
     ok "$_nombre encontrado"
