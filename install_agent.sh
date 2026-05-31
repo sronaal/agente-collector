@@ -762,6 +762,62 @@ resumen() {
 }
 
 # =========================================================
+# MOSTRAR PLAN Y CONFIRMAR
+# =========================================================
+_confirmar_plan() {
+    local _accion_python="Compilar Python ${PYTHON_VERSION} desde fuente"
+    if command -v python3.11 &>/dev/null && python3.11 --version &>/dev/null; then
+        _accion_python="Usar Python existente ($(python3.11 --version 2>/dev/null))"
+    fi
+
+    local _accion_openssl=""
+    if [ -f "/usr/local/ssl/lib/libssl.so.1.1" ]; then
+        _accion_openssl="OpenSSL 1.1 ya compilado"
+    else
+        local _ossl_ver
+        _ossl_ver=$(openssl version 2>/dev/null | awk '{print $2}' | cut -d. -f1-2)
+        if [ -n "$_ossl_ver" ] && [ "$(echo "$_ossl_ver" | cut -d. -f1)" -ge 1 ] && [ "$(echo "$_ossl_ver" | cut -d. -f2)" -ge 1 ]; then
+            _accion_openssl="OpenSSL $_ossl_ver del sistema (compatible)"
+        else
+            _accion_openssl="Compilar OpenSSL 1.1 desde fuente"
+        fi
+    fi
+
+    echo ""
+    echo "====================================================="
+    echo " PLAN DE INSTALACION"
+    echo "====================================================="
+    echo ""
+    echo "  Distribucion  : ${DISTRO_ID} ${DISTRO_VERSION_ID-}"
+    echo "  Directorio    : ${AGENT_DIR}"
+    echo "  Usuario       : ${SERVICE_USER}"
+    echo ""
+    echo "  Acciones a realizar:"
+    echo ""
+    echo "    [1/9]  Verificar Python 3.11"
+    echo "    [2/9]  Instalar dependencias de compilación"
+    echo "    [3/9]  Verificar OpenSSL"
+    echo "    [4/9]  ${_accion_python}"
+    echo "    [5/9]  Verificar módulos de Python"
+    echo "    [6/9]  Crear usuario y directorio"
+    echo "    [7/9]  Copiar archivos del agente"
+    echo "    [8/9]  Crear entorno virtual e instalar dependencias"
+    echo "    [9/9]  Configurar .env"
+    echo ""
+    echo "  OpenSSL      : ${_accion_openssl}"
+    echo "  Python       : ${_accion_python}"
+    echo ""
+
+    read -p "¿Continuar con la instalación? (s/N): " CONFIRMAR
+    if [[ ! "${CONFIRMAR}" =~ ^[sSyY] ]]; then
+        echo ""
+        aviso "Instalación cancelada."
+        exit 0
+    fi
+    echo ""
+}
+
+# =========================================================
 # MAIN
 # =========================================================
 main() {
@@ -778,6 +834,7 @@ main() {
     fi
 
     detectar_distro
+    _confirmar_plan
 
     paso1_python311 || {
         paso2_dependencias
