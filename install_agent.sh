@@ -533,8 +533,8 @@ paso6_copiar_agente() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
-        if [ "$SCRIPT_DIR" = "$AGENT_DIR" ]; then
-            ok "Script ejecutándose desde ${AGENT_DIR} — archivos ya en su lugar"
+        if [ "$SCRIPT_DIR" = "$AGENT_DIR" ] || [ -d "${AGENT_DIR}/src" ]; then
+            ok "Archivos ya existen en ${AGENT_DIR} — saltando copia"
         else
             mkdir -p "${AGENT_DIR}/config"
             cp -r "${SCRIPT_DIR}/src" "${AGENT_DIR}/" || true
