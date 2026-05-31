@@ -108,6 +108,36 @@ instalar_grupo_dev() {
 }
 
 # =========================================================
+# VERIFICAR HEADER (busca en rutas estándar y multi-arch)
+# =========================================================
+HEADER_ERROR=""
+_verificar_header() {
+    local _nombre="$1" _header="$2" _pkg_rhel="$3" _pkg_deb="$4" _pkg_suse="$5"
+    local _found=false
+    for _hp in $_header; do
+        [ -f "$_hp" ] && _found=true && break
+    done
+    if ! $_found; then
+        aviso "$_nombre no encontrado. Instalando..."
+        case "$DISTRO_FAMILY" in
+            rhel) instalar_paquetes "$_pkg_rhel" ;;
+            debian) instalar_paquetes "$_pkg_deb" ;;
+            suse) instalar_paquetes "$_pkg_suse" ;;
+        esac
+        _found=false
+        for _hp in $_header; do
+            [ -f "$_hp" ] && _found=true && break
+        done
+    fi
+    if ! $_found; then
+        HEADER_ERROR="$_nombre"
+        error "FATAL: $_nombre no encontrado. Instala '$_pkg_rhel' manualmente."
+        return 1
+    fi
+    ok "$_nombre encontrado"
+}
+
+# =========================================================
 # PASO 1: Verificar si ya hay Python 3.11
 # =========================================================
 paso1_python311() {
@@ -175,7 +205,6 @@ paso2_dependencias() {
                 xz-devel sqlite-devel readline-devel \
                 tk-devel gdbm-devel ncurses-devel \
                 uuid-devel libuuid-devel pkgconfig
-            # perl-CORE no es necesario en todas las versiones
             instalar_paquetes perl-CORE 2>/dev/null || true
             ;;
         debian)
@@ -196,31 +225,16 @@ paso2_dependencias() {
             ;;
     esac
 
-    local _zlib_found=false
-    for _zp in /usr/include/zlib.h /usr/include/*-linux-gnu/zlib.h; do
-        [ -f "$_zp" ] && _zlib_found=true && break
-    done
-    if ! $_zlib_found; then
-        aviso "zlib.h no encontrado. Intentando instalación específica..."
-        case "$DISTRO_FAMILY" in
-            rhel) instalar_paquetes zlib-devel ;;
-            debian) instalar_paquetes zlib1g-dev ;;
-            suse) instalar_paquetes zlib-devel ;;
-        esac
-    fi
-
-    local _sqlite_found=false
-    for _sp in /usr/include/sqlite3.h /usr/include/*-linux-gnu/sqlite3.h; do
-        [ -f "$_sp" ] && _sqlite_found=true && break
-    done
-    if ! $_sqlite_found; then
-        aviso "sqlite3.h no encontrado. Intentando instalación específica..."
-        case "$DISTRO_FAMILY" in
-            rhel) instalar_paquetes sqlite-devel ;;
-            debian) instalar_paquetes libsqlite3-dev ;;
-            suse) instalar_paquetes sqlite3-devel ;;
-        esac
-    fi
+    _verificar_header "zlib.h"    "/usr/include/zlib.h /usr/include/*-linux-gnu/zlib.h" \
+        "zlib-devel" "zlib1g-dev" "zlib-devel" || exit 1
+    _verificar_header "sqlite3.h" "/usr/include/sqlite3.h /usr/include/*-linux-gnu/sqlite3.h" \
+        "sqlite-devel" "libsqlite3-dev" "sqlite3-devel" || exit 1
+    _verificar_header "bzlib.h"   "/usr/include/bzlib.h /usr/include/*-linux-gnu/bzlib.h" \
+        "bzip2-devel" "libbz2-dev" "libbz2-devel" || exit 1
+    _verificar_header "lzma.h"    "/usr/include/lzma.h /usr/include/*-linux-gnu/lzma.h" \
+        "xz-devel" "liblzma-dev" "xz-devel" || exit 1
+    _verificar_header "ssl.h"     "/usr/include/openssl/ssl.h" \
+        "openssl-devel" "libssl-dev" "libopenssl-devel" || exit 1
 
     ok "Dependencias instaladas"
 }
@@ -235,7 +249,6 @@ paso2b_openssl() {
     echo "====================================================="
     echo ""
 
-    # Si ya instalamos OpenSSL 1.1 antes, salir
     if [ -f "/usr/local/ssl/lib/libssl.so.1.1" ]; then
         ok "OpenSSL 1.1 ya compilado en /usr/local/ssl"
         return 0
@@ -308,7 +321,6 @@ paso3_compilar_python() {
     unset LDFLAGS CPPFLAGS LD_LIBRARY_PATH
 
     local ssl_dir="/usr"
-    local openssl_args=""
     if [ -f "/usr/local/ssl/lib/libssl.so.1.1" ]; then
         ssl_dir="/usr/local/ssl"
         export LDFLAGS="-L${ssl_dir}/lib"
@@ -326,29 +338,32 @@ paso3_compilar_python() {
 
     make distclean || true
 
-    local _zlib_found=false
-    for _zp in /usr/include/zlib.h /usr/include/*-linux-gnu/zlib.h; do
-        [ -f "$_zp" ] && _zlib_found=true && break
-    done
+    # Re-verificar headers antes de configure (doble seguridad)
+    _verificar_header "zlib.h"    "/usr/include/zlib.h /usr/include/*-linux-gnu/zlib.h" \
+        "zlib-devel" "zlib1g-dev" "zlib-devel" || exit 1
+    _verificar_header "sqlite3.h" "/usr/include/sqlite3.h /usr/include/*-linux-gnu/sqlite3.h" \
+        "sqlite-devel" "libsqlite3-dev" "sqlite3-devel" || exit 1
 
     local _configure_opts="--prefix=${PYTHON_PREFIX} --with-openssl=${ssl_dir} --with-openssl-rpath=auto --enable-shared"
-    if ! $_zlib_found; then
-        aviso "zlib.h no encontrado — compilando Python sin ensurepip (pip se instalará manualmente)"
-        _configure_opts="$_configure_opts --without-ensurepip"
-    fi
 
     ./configure $_configure_opts
 
     make -j$(nproc)
     make altinstall
 
-    if ! $_zlib_found; then
-        aviso "Instalando pip manualmente via get-pip.py..."
+    # pip condicional: solo si zlib está disponible
+    if python3.11 -c "import zlib" &>/dev/null; then
+        aviso "Instalando pip via get-pip.py..."
         wget -q https://bootstrap.pypa.io/get-pip.py
         export LD_LIBRARY_PATH="${ssl_dir}/lib:${LD_LIBRARY_PATH}"
-        ${PYTHON_PREFIX}/bin/python3.11 get-pip.py
+        if ${PYTHON_PREFIX}/bin/python3.11 get-pip.py; then
+            ok "pip instalado"
+        else
+            aviso "get-pip.py falló - se reintentará en paso 4"
+        fi
         rm -f get-pip.py
-        ok "pip instalado manualmente"
+    else
+        aviso "zlib no disponible - pip se instalará en paso 4"
     fi
 
     echo "${PYTHON_PREFIX}/lib" > /etc/ld.so.conf.d/python3.11.conf
@@ -394,14 +409,20 @@ paso4_verificar_python() {
 
     python3.11 --version
 
-    python3.11 -c "import ssl; print('SSL:', ssl.OPENSSL_VERSION)" || true
-    python3.11 -c "import sqlite3; print('SQLite ok')" || _reconstruir_modulo \
-        "sqlite3" "sqlite-devel" "libsqlite3-dev" "sqlite3-devel" || true
-    python3.11 -c "import bz2; print('BZ2 ok')" || _reconstruir_modulo \
-        "bz2" "bzip2-devel" "libbz2-dev" "libbz2-devel" || true
-    python3.11 -c "import lzma; print('LZMA ok')" || _reconstruir_modulo \
-        "lzma" "xz-devel" "liblzma-dev" "xz-devel" || true
+    python3.11 -c "import ssl;     print('SSL ok')"     || _reconstruir_modulo "ssl"     "openssl-devel"   "libssl-dev"     "libopenssl-devel" || true
+    python3.11 -c "import zlib;    print('ZLIB ok')"    || _reconstruir_modulo "zlib"    "zlib-devel"      "zlib1g-dev"     "zlib-devel"       || true
+    python3.11 -c "import sqlite3; print('SQLite ok')"  || _reconstruir_modulo "sqlite3" "sqlite-devel"    "libsqlite3-dev" "sqlite3-devel"    || true
+    python3.11 -c "import bz2;     print('BZ2 ok')"     || _reconstruir_modulo "bz2"     "bzip2-devel"     "libbz2-dev"     "libbz2-devel"     || true
+    python3.11 -c "import lzma;    print('LZMA ok')"    || _reconstruir_modulo "lzma"    "xz-devel"        "liblzma-dev"    "xz-devel"         || true
     python3.11 -c "import hashlib; print('HASHLIB ok')" || true
+
+    # Reintentar pip si no está
+    python3.11 -m pip --version &>/dev/null || {
+        aviso "pip no disponible. Instalando manualmente..."
+        wget -q https://bootstrap.pypa.io/get-pip.py
+        python3.11 get-pip.py && ok "pip instalado" || error "pip no se pudo instalar"
+        rm -f get-pip.py
+    }
 
     cat >/etc/profile.d/python311.sh <<EOF
 export PATH=${PYTHON_PREFIX}/bin:\$PATH
@@ -422,7 +443,6 @@ paso5_usuario() {
     echo ""
 
     if ! id -u ${SERVICE_USER} &>/dev/null; then
-        # RHEL usa /sbin/nologin, Debian /usr/sbin/nologin
         local nologin_shell
         if [ -f /usr/sbin/nologin ]; then
             nologin_shell="/usr/sbin/nologin"
@@ -528,7 +548,6 @@ EOL
         aviso "Archivo .env creado con valores por defecto"
     fi
 
-    # Generar UUID si uuidgen no esta disponible
     local uuid_val
     if command -v uuidgen &>/dev/null; then
         uuid_val=$(uuidgen)
@@ -631,7 +650,6 @@ EOF
 # PASO 11: Sugerencias post-instalacion segun distro
 # =========================================================
 paso11_sugerencias() {
-    # Sugerencia SELinux solo en RHEL-family
     if [ "$DISTRO_FAMILY" = "rhel" ] && command -v getenforce &>/dev/null; then
         if [ "$(getenforce)" = "Enforcing" ]; then
             echo ""
@@ -642,7 +660,6 @@ paso11_sugerencias() {
         fi
     fi
 
-    # Sugerencia firewall
     echo "Firewall: el agente necesita salida TCP a:"
     echo "  - Puerto 5038 (AMI - Asterisk)"
     echo "  - Puerto 8080 (Backend API)"
