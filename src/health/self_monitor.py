@@ -91,8 +91,8 @@ class AutoMonitor:
                 await asyncio.sleep(self.intervalo)
 
     @staticmethod
-    def recolectar_metricas_sistema() -> Dict[str, float]:
-        """Recolecta metricas del sistema (CPU, RAM, disco).
+    def recolectar_metricas_sistema() -> Dict[str, Any]:
+        """Recolecta metricas del sistema (CPU, RAM, disco, red).
 
         Metodo estatico reutilizable desde el heartbeat y el
         auto-monitoreo. Retorna 0.0 si psutil no esta disponible.
@@ -102,14 +102,32 @@ class AutoMonitor:
         """
         try:
             import psutil
+            import socket
             proceso = psutil.Process()
+            disco = psutil.disk_usage('/')
+            interfaces = []
+            for nombre, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:
+                        interfaces.append({
+                            "nombre": nombre,
+                            "ip": addr.address,
+                            "mascara": addr.netmask,
+                        })
+            hostname = socket.gethostname()
+            ip_servidor = socket.gethostbyname(hostname)
             return {
                 "cpu_porcentaje": psutil.cpu_percent(interval=0.3),
                 "ram_mb": round(psutil.virtual_memory().used / 1024 / 1024, 1),
                 "ram_porcentaje": psutil.virtual_memory().percent,
-                "disco_porcentaje": psutil.disk_usage('/').percent,
+                "disco_porcentaje": disco.percent,
+                "disco_total_gb": round(disco.total / 1024 / 1024 / 1024, 1),
+                "disco_usado_gb": round(disco.used / 1024 / 1024 / 1024, 1),
                 "proceso_cpu": proceso.cpu_percent(),
                 "proceso_ram_mb": round(proceso.memory_info().rss / 1024 / 1024, 1),
+                "hostname": hostname,
+                "ip_servidor": ip_servidor,
+                "interfaces_red": interfaces,
             }
         except ImportError:
             return {
@@ -117,8 +135,13 @@ class AutoMonitor:
                 "ram_mb": 0.0,
                 "ram_porcentaje": 0.0,
                 "disco_porcentaje": 0.0,
+                "disco_total_gb": 0.0,
+                "disco_usado_gb": 0.0,
                 "proceso_cpu": 0.0,
                 "proceso_ram_mb": 0.0,
+                "hostname": "",
+                "ip_servidor": "",
+                "interfaces_red": [],
             }
 
     async def _recolectar_metricas(self) -> Dict[str, Any]:
