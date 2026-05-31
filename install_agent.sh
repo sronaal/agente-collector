@@ -131,24 +131,6 @@ _verificar_header() {
                 else
                     yum install -y "$_pkg" 2>&1 || true
                 fi
-                # Si falló, intentar habilitar repos comunes
-                _found=false
-                for _hp in $_header; do
-                    [ -f "$_hp" ] && _found=true && break
-                done
-                if ! $_found; then
-                    aviso "Reintentando con repositorios adicionales..."
-                    if command -v dnf &>/dev/null; then
-                        dnf install -y epel-release 2>/dev/null || true
-                        dnf config-manager --set-enabled crb 2>/dev/null || true
-                        dnf config-manager --set-enabled powertools 2>/dev/null || true
-                        dnf install -y "$_pkg" 2>&1 || true
-                    else
-                        yum install -y epel-release 2>/dev/null || true
-                        yum-config-manager --enable base 2>/dev/null || true
-                        yum install -y "$_pkg" 2>&1 || true
-                    fi
-                fi
                 ;;
             debian)
                 apt-get install -y "$_pkg" 2>&1 || true
@@ -166,19 +148,25 @@ _verificar_header() {
         HEADER_ERROR="$_nombre"
         echo ""
         error "FATAL: $_nombre no encontrado después de instalar '$_pkg'."
-        error "Posibles causas:"
-        error "  1. Sin conexión a internet — verifica: ping google.com"
-        error "  2. Repositorios deshabilitados — verifica: yum repolist"
-        error "  3. Package manager bloqueado — verifica: rm -f /var/run/yum.pid"
-        error ""
-        error "Solución manual:"
+        echo ""
         if [ "$DISTRO_FAMILY" = "rhel" ]; then
-            error "  yum install -y $_pkg_rhel"
+            error "El servidor no tiene acceso al paquete '$_pkg_rhel'."
+            error "Verifica los repositorios y activa los necesarios:"
+            echo ""
+            error "  1. Ver repos disponibles:  yum repolist all"
+            error "  2. Ver suscripción RHEL:  subscription-manager status"
+            error "  3. Activar repos base:"
+            error "     subscription-manager repos --enable rhel-*-baseos-rpms"
+            error "     subscription-manager repos --enable rhel-*-appstream-rpms"
+            echo ""
+            error "  4. Instalar manualmente:  yum install -y $_pkg_rhel"
+            echo ""
         elif [ "$DISTRO_FAMILY" = "debian" ]; then
             error "  apt-get install -y $_pkg_deb"
         else
             error "  zypper install -y $_pkg_suse"
         fi
+        error "Una vez instalado manualmente, vuelve a ejecutar el script."
         echo ""
         return 1
     fi
