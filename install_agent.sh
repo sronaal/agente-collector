@@ -34,11 +34,11 @@ error() { echo -e "${ROJO}[ERROR]${NC} $1"; }
 # DETECTAR DISTRIBUCION
 # =========================================================
 detectar_distro() {
+    DISTRO_FAMILY=""
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         DISTRO_ID="$ID"
         DISTRO_VERSION_ID="$VERSION_ID"
-        DISTRO_FAMILY=""
         case "$ID" in
             centos|rhel|rocky|almalinux|fedora|amzn)
                 DISTRO_FAMILY="rhel" ;;
@@ -46,15 +46,21 @@ detectar_distro() {
                 DISTRO_FAMILY="debian" ;;
             suse|opensuse|sles)
                 DISTRO_FAMILY="suse" ;;
-            *)
-                DISTRO_FAMILY="unknown" ;;
         esac
-    elif [ -f /etc/redhat-release ]; then
-        DISTRO_ID="rhel"; DISTRO_FAMILY="rhel"
-    elif [ -f /etc/debian_version ]; then
-        DISTRO_ID="debian"; DISTRO_FAMILY="debian"
-    else
-        DISTRO_ID="unknown"; DISTRO_FAMILY="unknown"
+    fi
+    # Si os-release no lo detectó, probar con archivos tradicionales
+    if [ -z "$DISTRO_FAMILY" ]; then
+        if [ -f /etc/redhat-release ]; then
+            DISTRO_ID="rhel"; DISTRO_FAMILY="rhel"
+        elif [ -f /etc/debian_version ]; then
+            DISTRO_ID="debian"; DISTRO_FAMILY="debian"
+        elif command -v rpm &>/dev/null; then
+            DISTRO_ID="rhel"; DISTRO_FAMILY="rhel"
+        elif command -v dpkg &>/dev/null; then
+            DISTRO_ID="debian"; DISTRO_FAMILY="debian"
+        else
+            DISTRO_ID="unknown"; DISTRO_FAMILY="unknown"
+        fi
     fi
     info "Distribucion detectada: ${DISTRO_ID} ${DISTRO_VERSION_ID-}"
 }
@@ -147,7 +153,7 @@ _verificar_header() {
     if ! $_found; then
         HEADER_ERROR="$_nombre"
         echo ""
-        error "FATAL: $_nombre no encontrado después de instalar '$_pkg'."
+        error "FATAL: $_nombre no encontrado."
         echo ""
         if [ "$DISTRO_FAMILY" = "rhel" ]; then
             error "El servidor no tiene acceso al paquete '$_pkg_rhel'."
@@ -164,7 +170,14 @@ _verificar_header() {
         elif [ "$DISTRO_FAMILY" = "debian" ]; then
             error "  apt-get install -y $_pkg_deb"
         else
-            error "  zypper install -y $_pkg_suse"
+            error "Instala manualmente uno de estos paquetes según tu distro:"
+            error "  Red Hat / CentOS:  yum install -y $_pkg_rhel"
+            error "  Debian / Ubuntu:   apt-get install -y $_pkg_deb"
+            error "  SUSE / openSUSE:   zypper install -y $_pkg_suse"
+        fi
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            error "Distro detectada: $ID $VERSION_ID"
         fi
         error "Una vez instalado manualmente, vuelve a ejecutar el script."
         echo ""
