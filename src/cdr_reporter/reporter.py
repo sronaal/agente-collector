@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import aiomysql
@@ -108,13 +108,13 @@ class ReporterCDR:
         if self._pool is None:
             return
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cursor:
                 # Parametro de filtro incremental
                 desde = self._ultima_consulta or (
-                    datetime.now(timezone.utc).strftime("%Y-%m-%d 00:00:00")
+                    datetime.now().strftime("%Y-%m-%d 00:00:00")
                 )
 
                 try:
