@@ -34,15 +34,11 @@ class EstrategiaHTTPBatch(EstrategiaTransmision):
         self,
         cliente_http: Any,
         url_destino: str = "",
-        timeout: float = 30.0,
+        timeout: Optional[float] = None,
     ) -> None:
-        # Cliente HTTP asincrono con reintentos incorporados
         self.cliente = cliente_http
-        # URL del endpoint donde se enviaran los eventos
         self.url = url_destino
-        # Timeout maximo para la peticion HTTP
         self.timeout = timeout
-        # Logger singleton para registro de eventos
         self.logger = LoggerEstructurado.obtener_instancia()
 
     async def transmitir(
@@ -127,24 +123,21 @@ class EstrategiaHTTPBatch(EstrategiaTransmision):
 class EstrategiaWSRealtime(EstrategiaTransmision):
     """Transmite eventos al backend en tiempo real via WebSocket.
 
-    Util para eventos que requieren latencia menor a 500ms.
-    Mantiene una conexion persistente y reutiliza el socket.
+    Estrategia principal para eventos en vivo. Envia cada
+    evento individualmente por WebSocket. Si falla un evento,
+    registra el error pero continua con los siguientes para
+    no bloquear el pipeline. Retorna False solo si TODOS
+    los eventos fallan.
 
     Args:
         cliente_ws: Cliente WebSocket para la conexion persistente.
-        url_destino: URL del endpoint WebSocket.
     """
 
     def __init__(
         self,
         cliente_ws: Any,
-        url_destino: str = "",
     ) -> None:
-        # Cliente WebSocket asincrono con reconexion automatica
         self.cliente = cliente_ws
-        # URL del endpoint WebSocket del backend
-        self.url = url_destino
-        # Logger singleton para registro de eventos
         self.logger = LoggerEstructurado.obtener_instancia()
 
     async def transmitir(
@@ -152,29 +145,25 @@ class EstrategiaWSRealtime(EstrategiaTransmision):
         eventos: List[Dict[str, Any]],
         agente_id: str,
     ) -> bool:
-        """Transmite eventos en tiempo real via WebSocket.
-
-        Args:
-            eventos: Lista de eventos normalizados.
-            agente_id: UUID del agente.
-
-        Returns:
-            True si la transmision fue exitosa.
-        """
         if not eventos:
             return True
 
-        # Enviar cada evento individualmente por WebSocket
+        exitosos = 0
+        fallidos = 0
+
         for evento in eventos:
             try:
                 exito = await self.cliente.enviar_evento(evento, agente_id)
-                if not exito:
+                if exito:
+                    exitosos += 1
+                else:
+                    fallidos += 1
                     self.logger.error(
                         "Fallio transmision WebSocket",
                         contexto={"event_id": evento.get("event_id")}
                     )
-                    return False
             except Exception as error:
+                fallidos += 1
                 self.logger.error(
                     "Error en transmision WebSocket",
                     contexto={
@@ -182,6 +171,15 @@ class EstrategiaWSRealtime(EstrategiaTransmision):
                         "event_id": evento.get("event_id"),
                     }
                 )
-                return False
+
+        if fallidos > 0 and exitosos == 0:
+            self.logger.error(f"Todos los {fallidos} eventos fallaron por WebSocket")
+            return False
+
+        if fallidos > 0:
+            self.logger.advertencia(
+                f"{fallidos}/{len(eventos)} eventos fallaron por WebSocket, "
+                f"{exitosos} exitosos"
+            )
 
         return True

@@ -2,23 +2,19 @@
 
 Mantiene una conexion persistente con el backend para
 transmitir eventos de llamadas con latencia menor a 500ms.
-Implementa reconexion automatica con backoff exponencial.
+Implementa reconexion automatica con backoff exponencial
+y un bucle de fondo que mantiene la conexion viva.
 """
 
-# Habilitar evaluacion diferida de type hints (Python 3.7+)
 from __future__ import annotations
 
-# Serializacion de diccionarios a JSON para transmision
+import asyncio
 import json
-# Tipos para firmas de metodos con type hints
 from typing import Any, Dict, Optional
 
-# Libreria websockets para conexiones WebSocket asincronas
 import websockets
 
-# Logger estructurado singleton para registro de eventos
 from src.core.logger import LoggerEstructurado
-# Estrategias de reintento con backoff exponencial
 from src.strategies.retry_policy import BackoffExponencial, EstrategiaReintento
 
 
@@ -26,13 +22,15 @@ class ClienteWebSocket:
     """Cliente WebSocket asincrono con reconexion automatica.
 
     Mantiene una conexion persistente al backend para
-    transmision en tiempo real de eventos. Implementa
-    heartbeat y reconexion con backoff exponencial.
+    transmision en tiempo real de eventos. Ejecuta un
+    bucle de reconexion en background que asegura que
+    la conexion siempre este activa.
 
     Args:
         url_destino: URL del endpoint WebSocket del backend.
         max_intentos_conexion: Maximo de intentos de reconexion.
         intervalo_ping: Intervalo de keepalive en segundos.
+        intervalo_reconexion: Segundos entre reintentos de reconexion.
         estrategia_reintento: Estrategia de reintento.
     """
 
@@ -41,30 +39,29 @@ class ClienteWebSocket:
         url_destino: str = "",
         max_intentos_conexion: int = 10,
         intervalo_ping: float = 30.0,
+        intervalo_reconexion: float = 5.0,
         estrategia_reintento: Optional[EstrategiaReintento] = None,
     ) -> None:
-        # URL del endpoint WebSocket del backend
         self.url = url_destino
-        # Numero maximo de intentos de conexion antes de fallar
         self.max_intentos = max_intentos_conexion
-        # Intervalo de ping keepalive en segundos
         self.intervalo_ping = intervalo_ping
-        # Estrategia de backoff para demora entre reintentos
+        self.intervalo_reconexion = intervalo_reconexion
         self.estrategia = estrategia_reintento or BackoffExponencial()
-        # Conexion WebSocket activa (None si no hay conexion)
         self._conexion: Optional[Any] = None
-        # Bandera de estado de conexion
         self._conectado = False
-        # Logger singleton para registro de eventos
+        self._agente_id: str = ""
+        self._activo = False
+        self._tarea_reconexion: Optional[asyncio.Task] = None
         self.logger = LoggerEstructurado.obtener_instancia()
 
     @property
     def esta_conectado(self) -> bool:
-        """Indica si hay una conexion WebSocket activa."""
         return self._conectado
 
     async def conectar(self, agente_id: str) -> bool:
         """Establece conexion WebSocket con el backend.
+
+        Inicia el bucle de reconexion en background.
 
         Args:
             agente_id: UUID del agente para autenticacion.
@@ -72,16 +69,22 @@ class ClienteWebSocket:
         Returns:
             True si la conexion fue exitosa.
         """
+        self._agente_id = agente_id
+
         if not self.url:
             self.logger.advertencia("URL WebSocket no configurada")
             return False
 
-        # Intentar conexion con reintentos y backoff exponencial
+        self._activo = True
+        exito = await self._conectar_intentar()
+        self._tarea_reconexion = asyncio.create_task(self._bucle_reconexion())
+        return exito
+
+    async def _conectar_intentar(self) -> bool:
+        """Intenta establecer conexion con reintentos."""
         for intento in range(1, self.max_intentos + 1):
             try:
-                # Cabecera con identificador del agente
-                cabeceras = {"X-Agent-ID": agente_id}
-                # Establecer conexion WebSocket
+                cabeceras = {"X-Agent-ID": self._agente_id}
                 self._conexion = await websockets.connect(
                     self.url,
                     additional_headers=cabeceras,
@@ -99,18 +102,59 @@ class ClienteWebSocket:
                     f"Fallo conexion WebSocket ({intento}/{self.max_intentos})",
                     contexto={"error": str(error)}
                 )
-
-                # Esperar con backoff antes del siguiente intento
                 if intento < self.max_intentos:
                     demora = self.estrategia.calcular_demora(intento)
-                    import asyncio
                     await asyncio.sleep(demora)
 
         self.logger.error("No se pudo establecer conexion WebSocket")
         return False
 
+    async def _bucle_reconexion(self) -> None:
+        """Bucle de fondo que mantiene la conexion activa.
+
+        Verifica periodicamente el estado de la conexion.
+        Si se pierde, reintenta la conexion automaticamente.
+        """
+        while self._activo:
+            try:
+                if not self._conectado or self._conexion is None:
+                    self.logger.info("Reconectando WebSocket...")
+                    await self._conectar_intentar()
+                elif self._conexion is not None:
+                    try:
+                        pong = await asyncio.wait_for(
+                            self._conexion.ping(),
+                            timeout=5.0
+                        )
+                        await asyncio.wait_for(pong, timeout=5.0)
+                    except Exception:
+                        self._conectado = False
+                        self.logger.advertencia("WebSocket ping fallido, reconectando...")
+                        await self._conectar_intentar()
+
+                await asyncio.sleep(self.intervalo_reconexion)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as error:
+                self.logger.error(
+                    "Error en bucle de reconexion WebSocket",
+                    contexto={"error": str(error)}
+                )
+                await asyncio.sleep(self.intervalo_reconexion)
+
     async def cerrar(self) -> None:
         """Cierra la conexion WebSocket de forma segura."""
+        self._activo = False
+
+        if self._tarea_reconexion is not None:
+            self._tarea_reconexion.cancel()
+            try:
+                await self._tarea_reconexion
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._tarea_reconexion = None
+
         self._conectado = False
         if self._conexion is not None:
             try:
@@ -127,6 +171,8 @@ class ClienteWebSocket:
     ) -> bool:
         """Envia un evento individual por WebSocket.
 
+        Si no hay conexion activa, reintenta conectarse.
+
         Args:
             evento: Evento normalizado a enviar.
             agente_id: UUID del agente.
@@ -134,16 +180,13 @@ class ClienteWebSocket:
         Returns:
             True si el envio fue exitoso.
         """
-        # Si no hay conexion activa, intentar reconectar
         if not self._conectado or self._conexion is None:
-            exito = await self.reconectar(agente_id)
+            exito = await self._conectar_intentar()
             if not exito:
                 return False
 
         try:
-            # Serializar evento a JSON para transmision
             mensaje = json.dumps(evento, ensure_ascii=False, default=str)
-            # Enviar mensaje por el socket WebSocket
             await self._conexion.send(mensaje)
             return True
 
@@ -156,13 +199,6 @@ class ClienteWebSocket:
             return False
 
     async def reconectar(self, agente_id: str) -> bool:
-        """Reintenta la conexion WebSocket.
-
-        Args:
-            agente_id: UUID del agente.
-
-        Returns:
-            True si la reconexion fue exitosa.
-        """
+        """Reintenta la conexion WebSocket."""
         await self.cerrar()
         return await self.conectar(agente_id)

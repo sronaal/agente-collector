@@ -104,22 +104,25 @@ class MotorIngestion:
         self.cliente_http = ClienteHTTP(
             verificar_tls=False,
         )
+        # Construir URL base para WebSocket (reemplazar http:// por ws://)
+        ws_url_base = self.config.backend.url.replace("http://", "ws://").replace("https://", "wss://")
         # Cliente WebSocket para transmision en tiempo real
-        self.cliente_ws = ClienteWebSocket()
-        # Estrategia HTTP batch para envio por lotes
+        self.cliente_ws = ClienteWebSocket(
+            url_destino=f"{ws_url_base}/ws/agent/realtime",
+        )
+        # Estrategia HTTP batch para envio por lotes (fallback buffer flush)
         self.estrategia_http = EstrategiaHTTPBatch(
             cliente_http=self.cliente_http,
             url_destino=f"{self.config.backend.url}/api/v1/agent/events",
         )
-        # Estrategia WebSocket para eventos en tiempo real
+        # Estrategia WebSocket para eventos en tiempo real (principal)
         self.estrategia_ws = EstrategiaWSRealtime(
             cliente_ws=self.cliente_ws,
-            url_destino=f"{self.config.backend.url}/ws/agent/realtime",
         )
         # Gestor de colas que decide entre transmision online o buffer offline
         self.gestor_colas = GestorColas(
             almacen_buffer=self.almacen,
-            estrategia_transmision=self.estrategia_http,
+            estrategia_transmision=self.estrategia_ws,
             intervalo_flush=self.config.buffer.intervalo_flush,
         )
 
@@ -169,11 +172,13 @@ class MotorIngestion:
         self.contexto.inicializar(
             agente_id=self.config.agente_id,
             pbx_host=self.config.ami.host,
+            empresa_id=self.config.empresa_id,
         )
 
-        # Paso 1: Inicializar almacenamiento SQLite y cliente HTTP
+        # Paso 1: Inicializar almacenamiento SQLite, cliente HTTP y WebSocket
         await self.almacen.inicializar()
         await self.cliente_http.iniciar()
+        await self.cliente_ws.conectar(self.contexto.agente_id)
 
         # Paso 2: Crear conector AMI via Factory Method y conectar a Asterisk
         self.conector = await self.fabrica.crear_conector(

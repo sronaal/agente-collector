@@ -351,6 +351,7 @@ class EntradaColaEnProgreso:
             self.agente = evento.get("agente", self.agente)
             self.tiempo_espera = evento.get("tiempo_espera", self.tiempo_espera)
         elif tipo == "AgentComplete":
+            self.cola = evento.get("cola", self.cola)
             self.agente = evento.get("agente", self.agente)
             self.tiempo_espera = evento.get("tiempo_espera", self.tiempo_espera)
             self.tiempo_conversacion = evento.get("tiempo_conversacion", self.tiempo_conversacion)

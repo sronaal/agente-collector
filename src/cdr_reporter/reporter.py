@@ -152,7 +152,7 @@ class ReporterCDR:
         payload = {
             "agenteId": self.contexto.agente_id,
             "timestamp": timestamp,
-            "empresaId": "",
+            "empresaId": self.contexto.empresa_id,
             "ultimaConsulta": desde,
             "datos": {
                 "llamadasNormalizadas": self._serializar(llamadas),

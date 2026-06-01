@@ -107,9 +107,9 @@ class ClienteHTTP:
         # Bucle de reintentos con backoff exponencial entre cada intento
         for intento in range(1, self.max_intentos + 1):
             try:
-                # Usar timeout especifico o el timeout por defecto
-                tiempo_limite = timeout or self.timeout
-                # Ejecutar la peticion HTTP
+                # Usar timeout especifico o el timeout por defecto.
+                # timeout=None significa sin timeout (httpx espera indefinido).
+                tiempo_limite = timeout if timeout is not None else self.timeout
                 respuesta = await self._cliente.request(
                     method=metodo.upper(),
                     url=url,

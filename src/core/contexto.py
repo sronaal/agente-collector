@@ -58,11 +58,9 @@ class ContextoEjecucion:
     def __init__(self) -> None:
         # UUID del agente asignado por el backend
         self.agente_id: str = ""
-        # Estado actual del ciclo de vida del agente
+        self.empresa_id: str = ""
         self.estado: EstadoAgente = EstadoAgente.DETENIDO
-        # Direccion IP o hostname de la PBX monitoreada
         self.pbx_host: str = ""
-        # Version de Asterisk/FreePBX detectada
         self.pbx_version: str = ""
         # Contadores y metricas internas del agente
         self.metricas: MetricasInternas = MetricasInternas()
@@ -80,14 +78,16 @@ class ContextoEjecucion:
             cls._instancia = cls()
         return cls._instancia
 
-    def inicializar(self, agente_id: str, pbx_host: str) -> None:
+    def inicializar(self, agente_id: str, pbx_host: str, empresa_id: str = "") -> None:
         """Inicializa el contexto con los datos del agente.
 
         Args:
             agente_id: UUID unico del agente.
             pbx_host: Direccion IP o hostname de la PBX.
+            empresa_id: UUID de la empresa (tenant) opcional.
         """
         self.agente_id = agente_id
+        self.empresa_id = empresa_id
         self.pbx_host = pbx_host
         self.metricas.inicio_agente = time.time()
         self.estado = EstadoAgente.INICIANDO

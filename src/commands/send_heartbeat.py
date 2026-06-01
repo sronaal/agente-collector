@@ -71,6 +71,16 @@ class ComandoEnviarHeartbeat(ComandoBase):
                     self.contexto.activar_modo_seguro()
                     return False
 
+                # Recuperar de modo seguro si el heartbeat vuelve a funcionar
+                if self.contexto.esta_en_modo_seguro():
+                    self.contexto.estado = EstadoAgente.ACTIVO
+                    self.logger.info(
+                        "Agente recuperado del modo seguro",
+                        contexto={
+                            "tiempo_activo": f"{self.contexto.tiempo_activo():.0f}s"
+                        }
+                    )
+
             # Actualizar timestamp del ultimo heartbeat exitoso
             self.contexto.metricas.ultimo_heartbeat = __import__("time").time()
             self.logger.info(
