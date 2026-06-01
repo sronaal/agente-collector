@@ -514,6 +514,73 @@ class NormalizadorSIP:
         }
 
 
+class NormalizadorLogSIP:
+    """Normaliza eventos SIP en logs SIP (sip_log) para almacenamiento y analisis.
+
+    Produce eventos de tipo 'sip_log' con mensajes legibles y clasificacion
+    para la tabla logs_sip del backend.
+    """
+
+    EVENTOS_LOG_SIP = frozenset({
+        "PeerStatus", "Registry",
+    })
+
+    def __init__(self) -> None:
+        self.contexto = ContextoEjecucion.obtener_instancia()
+
+    def normalizar(self, evento_crudo: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        tipo = evento_crudo.get("tipo", "")
+        if tipo not in self.EVENTOS_LOG_SIP:
+            return None
+
+        ahora = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        origen = evento_crudo.get("origen", "")
+        estado = evento_crudo.get("estado", "")
+        base = f"{tipo}:{origen}:{estado}:{ahora}"
+        event_id = hashlib.sha256(base.encode()).hexdigest()[:32]
+
+        nivel, clasificacion = self._clasificar(tipo, estado)
+
+        if tipo == "Registry":
+            mensaje = f"Registro SIP {estado.lower()} para {origen}"
+            raw = evento_crudo.get("codigo_respuesta", "")
+        else:
+            mensaje = f"Peer {origen} cambio a estado {estado}"
+            raw = evento_crudo.get("direccion", "")
+
+        return {
+            "event_id": event_id,
+            "timestamp": ahora,
+            "timestamp_fin": ahora,
+            "fuente": "sip",
+            "agente_id": self.contexto.agente_id,
+            "tipo": "sip_log",
+            "datos": {
+                "nivel": nivel,
+                "tipo_sip": tipo,
+                "clasificacion": clasificacion,
+                "mensaje": mensaje,
+                "raw": raw,
+            },
+        }
+
+    @staticmethod
+    def _clasificar(tipo: str, estado: str) -> tuple[str, str]:
+        estado_lower = estado.lower() if estado else ""
+        if tipo == "Registry":
+            if estado_lower in ("rejected", "timeout"):
+                return "ERROR", "auth"
+            elif estado_lower == "registered":
+                return "INFO", "auth"
+            return "WARN", "auth"
+        else:  # PeerStatus
+            if estado_lower in ("unregistered", "rejected"):
+                return "ERROR", "peer"
+            elif estado_lower == "registered":
+                return "INFO", "peer"
+            return "WARN", "peer"
+
+
 class NormalizadorCDR:
     """Normaliza eventos CDR (Call Detail Record) de Asterisk.
 

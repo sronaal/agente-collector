@@ -41,7 +41,7 @@ from src.health.self_monitor import AutoMonitor
 # Iterador asincrono sobre eventos AMI
 from src.iterators.ami_stream import StreamAMI
 # Estrategia de normalizacion de eventos AMI
-from src.strategies.normalization import NormalizadorAMI, NormalizadorQueue, NormalizadorCDR, NormalizadorSIP
+from src.strategies.normalization import NormalizadorAMI, NormalizadorQueue, NormalizadorCDR, NormalizadorSIP, NormalizadorLogSIP
 # Estrategias de transmision HTTP y WebSocket
 from src.strategies.transmission import EstrategiaHTTPBatch, EstrategiaWSRealtime
 # Cliente HTTP asincrono con reintentos
@@ -93,6 +93,8 @@ class MotorIngestion:
         self.normalizador_cdr = NormalizadorCDR()
         # Normalizador de eventos SIP (PeerStatus, Registry)
         self.normalizador_sip = NormalizadorSIP()
+        # Normalizador de logs SIP para logs_sip
+        self.normalizador_log_sip = NormalizadorLogSIP()
         # Almacen SQLite para buffer offline de eventos
         self.almacen = AlmacenSQLite(
             ruta_base=self.config.buffer.ruta,
@@ -314,6 +316,10 @@ class MotorIngestion:
                         resultado = self.normalizador_sip.normalizar(evento_crudo)
                         if resultado is not None:
                             await self.gestor_colas.encolar(resultado)
+                            self.contexto.metricas.eventos_encolados += 1
+                        resultado_log = self.normalizador_log_sip.normalizar(evento_crudo)
+                        if resultado_log is not None:
+                            await self.gestor_colas.encolar(resultado_log)
                             self.contexto.metricas.eventos_encolados += 1
                         continue
 
