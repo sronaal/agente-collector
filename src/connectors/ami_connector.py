@@ -110,6 +110,7 @@ class ConectorAMI(ConectorBase):
             self._conectado = True
             # Registrar los callbacks de eventos AMI
             self._registrar_manejadores_eventos()
+            await self._solicitar_queue_status()
             self.logger.info("Conexion AMI establecida exitosamente")
         except Exception as error:
             # Marcar como desconectado en caso de error
@@ -178,6 +179,27 @@ class ConectorAMI(ConectorBase):
                     contexto={"error": str(error)}
                 )
                 raise
+
+    async def _solicitar_queue_status(self) -> None:
+        """Solicita el estado actual de las colas via AMI QueueStatus.
+
+        Asterisk responde con eventos QueueParams (uno por cola),
+        QueueEntry (llamadas esperando), QueueMember (agentes).
+        Es necesario invocarlo explicitamente porque QueueParams
+        solo se envian en respuesta a esta accion o al recargar colas.
+        """
+        if self.gestor_llamadas is None:
+            return
+        try:
+            self.logger.info("Solicitando estado de colas (QueueStatus)")
+            await self.gestor_llamadas._manager.send_action(
+                {"Action": "QueueStatus"}
+            )
+        except Exception as error:
+            self.logger.error(
+                "Error al solicitar QueueStatus",
+                contexto={"error": str(error)}
+            )
 
     async def leer_eventos(self) -> AsyncIterator[Dict[str, Any]]:
         """Itera sobre los eventos AMI entrantes de forma asincrona.
