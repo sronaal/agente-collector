@@ -3,13 +3,17 @@
 Toma un evento crudo, lo normaliza usando la estrategia
 de normalizacion y lo encola en el gestor de colas para
 su transmision o almacenamiento offline.
+
+Soporta output dual del normalizador: eventos parciales
+(``evento_llamada`` con ``datos.subtipo``) y consolidados
+(``llamada_completa``). Hangup produce ambos en una lista.
 """
 
 # Habilitar evaluacion diferida de type hints (Python 3.7+)
 from __future__ import annotations
 
 # Tipos para firmas de metodos con type hints
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 # Interfaz base para el patron Command
 from src.commands.base import ComandoBase
@@ -53,18 +57,21 @@ class ComandoProcesarEvento(ComandoBase):
         # Logger singleton para registro de eventos
         self.logger = LoggerEstructurado.obtener_instancia()
         # Almacena el resultado de la normalizacion para posible deshacer
-        self._evento_normalizado: Optional[Dict[str, Any]] = None
+        self._evento_normalizado: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None
 
     async def ejecutar(self) -> bool:
         """Ejecuta el pipeline de procesamiento del evento.
 
-        El normalizador consolida eventos parciales (NewChannel,
-        Dial, Answer) internamente y solo retorna un registro
-        cuando la llamada finaliza (Hangup). Los eventos parciales
-        no se encolan individualmente.
+        El normalizador ahora retorna:
+        - ``None``: evento no pertenece a una llamada (se ignora).
+        - ``Dict`` ``evento_llamada``: evento parcial (NewChannel, Dial,
+          Answer, RTCPReceived) — se encola individualmente.
+        - ``List[Dict]``: Hangup produce dos outputs — el parcial
+          (``evento_llamada.subtipo=hangup``) y el consolidado
+          (``llamada_completa``) — ambos se encolan.
 
         Returns:
-            True si el evento fue procesado (puede ser parcial).
+            True si el evento fue procesado exitosamente.
         """
         try:
             tipo = self.evento_crudo.get("tipo", "")
@@ -77,7 +84,7 @@ class ComandoProcesarEvento(ComandoBase):
                     0, self.contexto.metricas.llamadas_activas - 1
                 )
 
-            # Normalizar el evento crudo (None si es evento parcial)
+            # Normalizar el evento crudo
             self._evento_normalizado = self.normalizador.normalizar(
                 self.evento_crudo
             )
@@ -85,22 +92,37 @@ class ComandoProcesarEvento(ComandoBase):
             # Incrementar contador de eventos procesados
             self.contexto.metricas.eventos_procesados += 1
 
-            # None = evento parcial (NewChannel, Dial, Answer)
-            # La llamada aun no termina, no se transmite individualmente
+            # None = evento no pertenece a llamada (Queue, SIP, etc.)
             if self._evento_normalizado is None:
                 return True
 
-            # Encolar el evento consolidado (llamada completa) para transmision
+            # Lista = Hangup (parcial + consolidado) — iterar y encolar cada uno
+            if isinstance(self._evento_normalizado, list):
+                for item in self._evento_normalizado:
+                    if self.gestor_colas is not None:
+                        await self.gestor_colas.encolar(item)
+                        self.contexto.metricas.eventos_encolados += 1
+                self.logger.info(
+                    "Llamada completada (parcial + consolidado)",
+                    contexto={
+                        "id_unico": self.evento_crudo.get("id_unico"),
+                        "origen": self.evento_crudo.get("origen"),
+                        "duracion": self.evento_crudo.get("duracion"),
+                    }
+                )
+                return True
+
+            # Dict = evento_llamada parcial — encolar individualmente
             if self.gestor_colas is not None:
                 await self.gestor_colas.encolar(self._evento_normalizado)
                 self.contexto.metricas.eventos_encolados += 1
 
+            subtipo = self._evento_normalizado.get("datos", {}).get("subtipo", "")
             self.logger.info(
-                "Llamada completada",
+                "Evento parcial emitido",
                 contexto={
+                    "subtipo": subtipo,
                     "id_unico": self.evento_crudo.get("id_unico"),
-                    "origen": self.evento_crudo.get("origen"),
-                    "duracion": self.evento_crudo.get("duracion"),
                 }
             )
             return True

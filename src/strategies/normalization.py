@@ -15,7 +15,7 @@ import hashlib
 # Modulo para timestamps Unix y tiempo de expiracion de llamadas huerfanas
 import time
 # Tipos para type hints en firmas de metodos
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 # Singleton de contexto para obtener el agente_id
 from src.core.contexto import ContextoEjecucion
@@ -200,6 +200,50 @@ class LlamadaEnProgreso:
         # Generar hash SHA-256 truncado a 32 caracteres para idempotencia
         return hashlib.sha256(base.encode()).hexdigest()[:32]
 
+    def _emitir_parcial(self, subtipo: str) -> Dict[str, Any]:
+        """Genera un dict ``evento_llamada`` para un subtipo parcial.
+
+        Args:
+            subtipo: Tipo de evento parcial (new_channel, dial, answer,
+                     rtcp_received, hangup).
+
+        Returns:
+            Diccionario con formato ``evento_llamada`` listo para transmitir.
+            El campo ``agente_id`` se completa externamente en ``normalizar()``.
+        """
+        ahora = self._ahora()
+        base = f"{self.id_unico}:{self.timestamp_inicio or ahora}:{subtipo}"
+        event_id = hashlib.sha256(base.encode()).hexdigest()[:32]
+
+        datos: Dict[str, Any] = {
+            "id_unico": self.id_unico,
+            "subtipo": subtipo,
+            "origen": self.origen,
+            "destino": self.destino,
+            "canal": self.canal,
+            "contexto": self.contexto,
+            "canal_origen": self.canal_origen,
+            "canal_destino": self.canal_destino,
+            "respondio": self.respondio,
+            "duracion_segundos": self.duracion if subtipo == "hangup" else "",
+            "causa": self.causa if subtipo == "hangup" else "",
+            "fraccion_perdida": self.fraccion_perdida if subtipo == "rtcp_received" else "",
+            "jitter": self.jitter if subtipo == "rtcp_received" else "",
+            "rtt": self.rtt if subtipo == "rtcp_received" else "",
+        }
+        # Solo incluir campos con valor para mantener el payload limpio
+        datos_limpios = {k: v for k, v in datos.items() if v}
+
+        return {
+            "event_id": event_id,
+            "timestamp": self.timestamp_inicio or ahora,
+            "timestamp_fin": ahora,
+            "fuente": "ami",
+            "agente_id": "",
+            "tipo": "evento_llamada",
+            "datos": datos_limpios,
+        }
+
     def _ahora(self) -> str:
         # Obtener timestamp actual con timezone UTC en formato ISO 8601
         return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -208,15 +252,19 @@ class LlamadaEnProgreso:
 class NormalizadorAMI(EstrategiaNormalizacion):
     """Normaliza eventos AMI y consolida llamadas completas.
 
-    Acumula los eventos parciales de cada llamada (identificada
-    por id_unico) y solo emite el registro consolidado cuando
-    la llamada finaliza (Hangup). Las llamadas huerfanas se
-    limpian automaticamente.
-
-    Uso:
-        normalizador = NormalizadorAMI()
-        resultado = normalizador.normalizar(evento_crudo)
+    Ahora produce output dual: cada evento no-terminal retorna un dict
+    ``evento_llamada`` con ``datos.subtipo``. Hangup retorna una lista con
+    el parcial (subtipo=hangup) y el consolidado ``llamada_completa``.
     """
+
+    # Mapper de tipos AMI → subtipos del schema evento_llamada
+    MAPA_SUBTIPOS = {
+        "NewChannel": "new_channel",
+        "Dial": "dial",
+        "Answer": "answer",
+        "RTCPReceived": "rtcp_received",
+        "Hangup": "hangup",
+    }
 
     def __init__(self) -> None:
         # Obtener instancia singleton del contexto de ejecucion
@@ -227,19 +275,25 @@ class NormalizadorAMI(EstrategiaNormalizacion):
         # 3600s = 1 hora: si una llamada no termina en 1h, se descarta
         self._tiempo_maximo_huerfana: float = 3600.0
 
-    def normalizar(self, evento_crudo: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Normaliza un evento y consolida informacion de la llamada.
+    def normalizar(
+        self, evento_crudo: Dict[str, Any]
+    ) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
+        """Normaliza un evento y produce output dual para streaming.
 
-        Si el evento es Hangup, retorna el registro consolidado
-        de toda la llamada. En cualquier otro caso, actualiza
-        el estado interno y retorna None (el evento parcial no
-        se transmite individualmente).
+        Para eventos no-terminales (NewChannel, Dial, Answer, RTCPReceived)
+        retorna un dict ``evento_llamada`` con el subtipo correspondiente.
+
+        Para Hangup retorna una lista con DOS elementos:
+        1. ``evento_llamada`` con subtipo=hangup (para streaming inmediato)
+        2. ``llamada_completa`` consolidada (para persistencia)
 
         Args:
             evento_crudo: Evento del conector AMI.
 
         Returns:
-            Dict consolidado si la llamada termino, None en caso contrario.
+            Dict ``evento_llamada`` para parciales,
+            Lista ``[evento_llamada, llamada_completa]`` para Hangup,
+            None si el evento no pertenece a una llamada.
         """
         # Extraer campos base del evento crudo
         id_unico = evento_crudo.get("id_unico", "")
@@ -262,24 +316,26 @@ class NormalizadorAMI(EstrategiaNormalizacion):
         llamada = self._llamadas[id_unico]
         llamada.actualizar_con(evento_crudo)
 
-        # Solo cuando llega Hangup se genera el registro consolidado
-        # Eventos parciales (NewChannel, Dial, Answer) retornan None
-        # y NO se transmiten individualmente al backend
-        if tipo == "Hangup":
-            # Generar el registro completo con todos los datos
-            registro = llamada.consolidar(self.contexto.agente_id)
-            # Eliminar la llamada del diccionario para evitar fuga de memoria
-            del self._llamadas[id_unico]
-            # Retornar el registro consolidado para su transmision
-            return registro
-
-        # RTCPReceived: actualizar QoS sin emitir evento
-        if tipo == "RTCPReceived":
-            llamada.actualizar_qos(evento_crudo)
+        subtipo = self.MAPA_SUBTIPOS.get(tipo)
+        if subtipo is None:
+            # Evento no mapeado (QueueParams, Cdr, etc) — no se emite como parcial
             return None
 
-        # Evento parcial: se acumula internamente, no se transmite
-        return None
+        # --- Hangup: output dual (parcial + consolidado) ---
+        if tipo == "Hangup":
+            parcial = llamada._emitir_parcial("hangup")
+            parcial["agente_id"] = self.contexto.agente_id
+            consolidado = llamada.consolidar(self.contexto.agente_id)
+            # Eliminar la llamada del diccionario para evitar fuga de memoria
+            del self._llamadas[id_unico]
+            # Retornar ambos como lista para que process_event itere
+            return [parcial, consolidado]
+
+        # --- Evento parcial: emitir ``evento_llamada`` con el subtipo ---
+        parcial = llamada._emitir_parcial(subtipo)
+        parcial["agente_id"] = self.contexto.agente_id
+
+        return parcial
 
     def _limpiar_llamadas_huerfanas(self) -> None:
         """Elimina llamadas que nunca recibieron Hangup.

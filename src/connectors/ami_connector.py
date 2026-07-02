@@ -73,6 +73,8 @@ class ConectorAMI(ConectorBase):
         self._demora_maxima_reconexion = 30.0
         # Logger singleton para registro de eventos
         self.logger = LoggerEstructurado.obtener_instancia()
+        # Mapa Channel→Uniqueid para correlacionar RTCPReceived sin Uniqueid
+        self._channel_to_uniqueid: Dict[str, str] = {}
 
     @property
     def esta_conectado(self) -> bool:
@@ -258,10 +260,15 @@ class ConectorAMI(ConectorBase):
             # Extraer campos basicos del mensaje AMI
             # CallerIDNum = quien llama, Exten = a quien llama
             # Channel = nombre del canal, Context = contexto del dialplan
+            canal = mensaje.get("Channel", "")
+            uniqueid = mensaje.get("Uniqueid", "")
+            # Poblar mapa Channel→Uniqueid para correlacion futura (RTCPReceived sin id)
+            if canal and uniqueid:
+                self._channel_to_uniqueid[canal] = uniqueid
             self._encolar_evento({
                 "tipo": "NewChannel",
-                "id_unico": mensaje.get("Uniqueid", ""),
-                "canal": mensaje.get("Channel", ""),
+                "id_unico": uniqueid,
+                "canal": canal,
                 "origen": mensaje.get("CallerIDNum", ""),
                 "destino": mensaje.get("Exten", ""),
                 "contexto": mensaje.get("Context", ""),
@@ -273,14 +280,23 @@ class ConectorAMI(ConectorBase):
         async def _manejar_dial(mensaje: Message) -> None:
             # Incluir canal_origen (quien marca) y canal_destino (quien recibe)
             # DestUniqueid permite correlacionar ambos lados de la llamada
+            canal_origen = mensaje.get("Channel", "")
+            canal_destino = mensaje.get("Destination", "")
+            id_unico = mensaje.get("Uniqueid", "")
+            destino_id_unico = mensaje.get("DestUniqueid", "")
+            # Poblar mapa para ambos canales involucrados en el dial
+            if canal_origen and id_unico:
+                self._channel_to_uniqueid[canal_origen] = id_unico
+            if canal_destino and destino_id_unico:
+                self._channel_to_uniqueid[canal_destino] = destino_id_unico
             self._encolar_evento({
                 "tipo": "Dial",
-                "id_unico": mensaje.get("Uniqueid", ""),
+                "id_unico": id_unico,
                 "origen": mensaje.get("CallerIDNum", ""),
                 "destino": mensaje.get("Exten", ""),
-                "canal_origen": mensaje.get("Channel", ""),
-                "canal_destino": mensaje.get("Destination", ""),
-                "destino_id_unico": mensaje.get("DestUniqueid", ""),
+                "canal_origen": canal_origen,
+                "canal_destino": canal_destino,
+                "destino_id_unico": destino_id_unico,
             })
 
         # Answer: alguien respondio la llamada
@@ -300,10 +316,14 @@ class ConectorAMI(ConectorBase):
         async def _manejar_cuelgue(mensaje: Message) -> None:
             # Duration = segundos desde NewChannel hasta Hangup
             # Cause-txt = descripcion legible de la causa de cuelgue
+            canal = mensaje.get("Channel", "")
+            # Limpiar entrada del mapa Channel→Uniqueid al finalizar la llamada
+            if canal and canal in self._channel_to_uniqueid:
+                del self._channel_to_uniqueid[canal]
             self._encolar_evento({
                 "tipo": "Hangup",
                 "id_unico": mensaje.get("Uniqueid", ""),
-                "canal": mensaje.get("Channel", ""),
+                "canal": canal,
                 "origen": mensaje.get("CallerIDNum", ""),
                 "duracion": mensaje.get("Duration", "0"),
                 "causa": mensaje.get("Cause-txt", ""),
@@ -479,16 +499,24 @@ class ConectorAMI(ConectorBase):
         # RTCPReceived: reporte RTCP con calidad de voz
         @gestor._manager.register_event("RTCPReceived")
         async def _manejar_rtcp(mensaje: Message) -> None:
+            uniqueid = mensaje.get("Uniqueid", "")
+            canal = mensaje.get("Channel", "")
+            # Si Uniqueid esta vacio o es SSRC (numerico), intentar resolver por canal
+            if not uniqueid or uniqueid.isdigit():
+                if canal in self._channel_to_uniqueid:
+                    uniqueid = self._channel_to_uniqueid[canal]
+                else:
+                    uniqueid = mensaje.get("SSRC", "")
             self._encolar_evento({
                 "tipo": "RTCPReceived",
-                "id_unico": mensaje.get("Uniqueid", mensaje.get("SSRC", "")),
+                "id_unico": uniqueid,
                 "fraccion_perdida": mensaje.get("FractionLost", "0"),
                 "jitter": mensaje.get("Jitter", "0"),
                 "rtt": mensaje.get("RTT", "0"),
                 "ssrc": mensaje.get("SSRC", ""),
                 "fuente_ip": mensaje.get("SourceIP", ""),
                 "fuente_puerto": mensaje.get("SourcePort", "0"),
-                "canal": mensaje.get("Channel", ""),
+                "canal": canal,
             })
 
     def _encolar_evento(self, evento: Dict[str, Any]) -> None:
