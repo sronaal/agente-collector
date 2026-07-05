@@ -166,6 +166,7 @@ class ComandoEnviarHeartbeat(ComandoBase):
             # Datos del heartbeat: estado, metricas, conexion AMI, sistema
             datos = {
                 "agente_id": self.contexto.agente_id,
+                "pbx_id": self.contexto.pbx_id,
                 "estado": self.contexto.estado.value,
                 "tiempo_activo": self.contexto.tiempo_activo(),
                 "active_calls": self.contexto.metricas.llamadas_activas,

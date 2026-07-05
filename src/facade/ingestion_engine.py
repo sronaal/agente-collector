@@ -173,6 +173,7 @@ class MotorIngestion:
             agente_id=self.config.agente_id,
             pbx_host=self.config.ami.host,
             empresa_id=self.config.empresa_id,
+            pbx_id=self.config.pbx_id,
         )
 
         # Paso 1: Inicializar almacenamiento SQLite, cliente HTTP y WebSocket

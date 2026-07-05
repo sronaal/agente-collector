@@ -94,6 +94,7 @@ class ConfiguracionAgente:
         self._cargado = False
         # Identificador unico del agente (UUID)
         self.agente_id: str = ""
+        self.pbx_id: str = ""
         self.empresa_id: str = ""
         self.token_registro: str = ""
         # Intervalo en segundos entre envios de heartbeat
@@ -140,6 +141,7 @@ class ConfiguracionAgente:
         """Extrae valores desde variables de entorno."""
         # Identidad del agente
         self.agente_id = os.getenv("AGENT_ID", "")
+        self.pbx_id = os.getenv("PBX_ID", "")
         self.empresa_id = os.getenv("EMPRESA_ID", "")
         self.token_registro = os.getenv("TOKEN_REGISTRO", "")
         self.intervalo_heartbeat = int(os.getenv("INTERVALO_HEARTBEAT", "30"))
