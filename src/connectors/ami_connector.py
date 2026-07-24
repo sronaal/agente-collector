@@ -519,6 +519,107 @@ class ConectorAMI(ConectorBase):
                 "canal": canal,
             })
 
+        # --- EVENTOS DEL SISTEMA ASTERISK (IT/VoIP) ---
+
+        # ModuleLoad: Asterisk carga o descarga un modulo
+        @gestor._manager.register_event("ModuleLoad")
+        async def _manejar_module_load(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "ModuleLoad",
+                "modulo": mensaje.get("Module", ""),
+                "estado": mensaje.get("Status", ""),
+            })
+
+        # ConfigReload: recarga de configuracion
+        @gestor._manager.register_event("ConfigReload")
+        async def _manejar_config_reload(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "ConfigReload",
+                "modulo": mensaje.get("Module", ""),
+                "estado": mensaje.get("Status", ""),
+            })
+
+        # Reload: evento de recarga generico
+        @gestor._manager.register_event("Reload")
+        async def _manejar_reload(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "Reload",
+                "modulo": mensaje.get("Module", ""),
+                "mensaje": mensaje.get("Message", ""),
+            })
+
+        # ExtensionStatus: cambio de estado de una extension
+        @gestor._manager.register_event("ExtensionStatus")
+        async def _manejar_extension_status(mensaje: Message) -> None:
+            status_map = {"0": "Idle", "1": "InUse", "2": "Busy", "4": "Unavailable", "8": "Ringing", "16": "Hold"}
+            raw = mensaje.get("Status", "0")
+            self._encolar_evento({
+                "tipo": "ExtensionStatus",
+                "extension": mensaje.get("Exten", ""),
+                "contexto": mensaje.get("Context", ""),
+                "estado": status_map.get(raw, raw),
+                "codigo_estado": raw,
+                "hint": mensaje.get("Hint", ""),
+            })
+
+        # DeviceStateChange: cambio de estado de un dispositivo
+        @gestor._manager.register_event("DeviceStateChange")
+        async def _manejar_device_state(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "DeviceStateChange",
+                "dispositivo": mensaje.get("Device", ""),
+                "estado": mensaje.get("State", ""),
+            })
+
+        # Alarm: alarma del sistema Asterisk
+        @gestor._manager.register_event("Alarm")
+        async def _manejar_alarma(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "Alarm",
+                "clase_alarma": mensaje.get("Alarm", ""),
+                "nivel": mensaje.get("Level", ""),
+                "info_adicional": mensaje.get("AdditionalInfo", ""),
+            })
+
+        # AlarmClear: limpieza de alarma
+        @gestor._manager.register_event("AlarmClear")
+        async def _manejar_alarma_clear(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "AlarmClear",
+                "clase_alarma": mensaje.get("Alarm", ""),
+                "info_adicional": mensaje.get("AdditionalInfo", ""),
+            })
+
+        # FullyBooted: Asterisk ha iniciado completamente
+        @gestor._manager.register_event("FullyBooted")
+        async def _manejar_fully_booted(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "FullyBooted",
+                "estado": "Booted",
+                "version_asterisk": mensaje.get("Uptime", ""),
+            })
+
+        # Shutdown: Asterisk se esta apagando
+        @gestor._manager.register_event("Shutdown")
+        async def _manejar_shutdown(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "Shutdown",
+                "estado": "Shutdown",
+                "apagado_remoto": mensaje.get("Shutdown", "false"),
+                "razon": mensaje.get("Restart", "false"),
+            })
+
+        # ContactStatus (PJSIP): estado de registro de contactos
+        @gestor._manager.register_event("ContactStatus")
+        async def _manejar_contact_status(mensaje: Message) -> None:
+            self._encolar_evento({
+                "tipo": "ContactStatus",
+                "endpoint": mensaje.get("Endpoint", ""),
+                "estado": mensaje.get("ContactStatus", ""),
+                "uri_contacto": mensaje.get("ContactURI", ""),
+                "user_agent": mensaje.get("UserAgent", ""),
+            })
+
     def _encolar_evento(self, evento: Dict[str, Any]) -> None:
         """Encola un evento en la cola interna para procesamiento.
 

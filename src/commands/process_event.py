@@ -13,6 +13,7 @@ Soporta output dual del normalizador: eventos parciales
 from __future__ import annotations
 
 # Tipos para firmas de metodos con type hints
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 # Interfaz base para el patron Command
@@ -23,6 +24,20 @@ from src.core.contexto import ContextoEjecucion
 from src.core.logger import LoggerEstructurado
 # Estrategia de normalizacion que consolida llamadas completas
 from src.strategies.normalization import NormalizadorAMI
+
+# Eventos de llamada que pasan por el normalizador
+# Cualquier evento fuera de este conjunto se considera evento del sistema
+# y se encola directamente sin normalizar.
+TIPOS_LLAMADA = {"NewChannel", "Dial", "Answer", "Hangup", "RTCPReceived", "Cdr"}
+
+# Severidad por tipo de evento del sistema
+# Los tipos no listados aqui heredan "INFO" por defecto
+MAPA_SEVERIDAD = {
+    "Alarm": "CRITICAL",
+    "AlarmClear": "WARNING",
+    "Shutdown": "CRITICAL",
+    "ContactStatus": "WARNING",
+}
 
 
 class ComandoProcesarEvento(ComandoBase):
@@ -63,7 +78,8 @@ class ComandoProcesarEvento(ComandoBase):
         """Ejecuta el pipeline de procesamiento del evento.
 
         El normalizador ahora retorna:
-        - ``None``: evento no pertenece a una llamada (se ignora).
+        - ``None``: evento no pertenece a una llamada (los eventos del
+          sistema se encolan antes del normalizador).
         - ``Dict`` ``evento_llamada``: evento parcial (NewChannel, Dial,
           Answer, RTCPReceived) — se encola individualmente.
         - ``List[Dict]``: Hangup produce dos outputs — el parcial
@@ -75,6 +91,27 @@ class ComandoProcesarEvento(ComandoBase):
         """
         try:
             tipo = self.evento_crudo.get("tipo", "")
+
+            # --- EVENTOS DEL SISTEMA ---
+            # Los eventos que NO son de llamada bypassan el normalizador
+            # y se encolan directamente como eventos del sistema.
+            # Inyectan agent_id y pbx_id del contexto de ejecucion.
+            if tipo not in TIPOS_LLAMADA:
+                evento_sistema = {
+                    "tipo": "sistema",
+                    "event_type": tipo,
+                    "subtype": None,
+                    "severity": MAPA_SEVERIDAD.get(tipo, "INFO"),
+                    "payload": {k: v for k, v in self.evento_crudo.items() if k != "tipo"},
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "agent_id": self.contexto.agente_id,
+                    "pbx_id": self.contexto.pbx_id,
+                }
+                if self.gestor_colas is not None:
+                    await self.gestor_colas.encolar(evento_sistema)
+                    self.contexto.metricas.eventos_encolados += 1
+                self.contexto.metricas.eventos_procesados += 1
+                return True
 
             # Actualizar contador de llamadas activas
             if tipo == "NewChannel":
@@ -93,6 +130,8 @@ class ComandoProcesarEvento(ComandoBase):
             self.contexto.metricas.eventos_procesados += 1
 
             # None = evento no pertenece a llamada (Queue, SIP, etc.)
+            # Nota: eventos del sistema se manejan arriba; esto es seguridad
+            # para eventos inesperados que no son de llamada.
             if self._evento_normalizado is None:
                 return True
 
